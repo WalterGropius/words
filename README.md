@@ -26,7 +26,7 @@ Instead of pressing a key for each word, the show can listen and put each word o
 3. In setup, switch **The Text** to **Voice (Soniox)**, pick the language, and press **Test the microphone**.
 4. Raise the curtain and speak. `M` mutes the mic, and the HUD shows the mic state and a running transcript for the operator.
 
-The real key stays on the server. `/api/soniox-key` hands the browser a single-use key that expires in a minute. Whatever is in the text box goes to Soniox as a vocabulary hint. Voice needs an internet connection and Chrome, Edge or Firefox (Safari records audio in a format Soniox can't detect). For Czech, use Cormorant, EB Garamond, Cinzel, Inter, DM Sans or Space Grotesk: the Fell types and Unifraktur have no ř, ě or ů.
+The real key stays on the server. `/api/soniox-key` hands the browser a single-use key that expires in a minute. Whatever is in the text box goes to Soniox as a vocabulary hint. Voice needs an internet connection and Chrome, Edge or Firefox (Safari records audio in a format Soniox can't detect). Every typeface has the full Czech alphabet.
 
 **Never show these words** keeps hesitations and fillers off the stage (by default the Czech `hm, mhm, mm, ehm, eh, em, e, é, uh, uhm, um, ah, ehe`). Matching ignores case and punctuation, and treats repeated letters as one, so `hm` also catches `Hmmm,`. Words made only of punctuation are dropped too. The operator transcript still shows everything.
 
@@ -64,7 +64,9 @@ In Line and Page mode, spoken words are written left to right into the frame. A 
 
 **Atmosphere:** glow, breathing, camera drift, stage dust, and optional film grain. With grain off, the background stays true black (0,0,0), so you can composite it with a screen or add blend.
 
-**Typefaces:** IM Fell English, DW Pica, French Canon, Double Pica (17th-century Fell types), Cormorant, EB Garamond, Cinzel, UnifrakturMaguntia, plus three modern sans serifs: Inter, DM Sans and Space Grotesk. There are also options for italic, capitals, and early-modern long ſ spelling.
+**Typefaces:** IM Fell English, DW Pica, French Canon, Double Pica (17th-century Fell types), Cormorant, EB Garamond, Cinzel, Cinzel Decorative, Tangerine (renaissance calligraphy), UnifrakturMaguntia, plus three modern sans serifs: Inter, DM Sans and Space Grotesk. There are also options for italic, capitals, and early-modern long ſ spelling.
+
+**Czech in the period faces:** Google Fonts serves the Fell types cut down to basic Latin, and Tangerine and UnifrakturMaguntia lack č ř ě ň ť ď ů. `scripts/czech-fonts.py` (needs `pip install fonttools brotli`) downloads the full fonts, composes the missing letters from each font's own accents, and writes them to `src/fonts/`, which the app loads instead. The output is committed, so you only rerun it to rebuild the fonts.
 
 Settings and text persist in `localStorage`.
 

@@ -102,7 +102,7 @@ export default function Setup({ text, onText, settings, onSettings, onPlay }: Pr
   const voice = s.source === "voice";
   const needsCzech = (voice && s.language === "cs") || /[ěščřžťďňůĚŠČŘŽŤĎŇŮ]/.test(text);
 
-  // the Fell types have no Czech letters: move to one that does when Czech is chosen
+  // a face without Czech letters: move to one that has them when Czech is chosen
   const setSource = (source: Source) =>
     onSettings({ ...settings, source, ...(source === "voice" && s.language === "cs" && !font.czech ? { font: "garamond" as const } : {}) });
 
@@ -336,7 +336,7 @@ export default function Setup({ text, onText, settings, onSettings, onPlay }: Pr
               ))}
             </div>
             {needsCzech && !font.czech && (
-              <p className="note note--warn">{font.label} has no Czech letters (ř, ě, ů…). Choose Cormorant, EB Garamond, Cinzel, Cinzel Decorative or one of the sans serifs.</p>
+              <p className="note note--warn">{font.label} has no Czech letters (ř, ě, ů…). Choose another typeface.</p>
             )}
             <Slider label="Size" value={s.size} min={0.4} max={2} step={0.05} onChange={(v) => set("size", v)} format={(v) => `${Math.round(v * 100)}%`} />
             <div className="row">

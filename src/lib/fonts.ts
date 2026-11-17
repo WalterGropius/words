@@ -1,47 +1,51 @@
+import localFont from "next/font/local";
 import {
-  IM_Fell_English,
-  IM_Fell_DW_Pica,
-  IM_Fell_French_Canon,
-  IM_Fell_Double_Pica,
   Cormorant_Garamond,
   EB_Garamond,
   Cinzel,
   Cinzel_Decorative,
-  Tangerine,
-  UnifrakturMaguntia,
   Inter,
   DM_Sans,
   Space_Grotesk,
 } from "next/font/google";
 
-// All faces are Google Fonts (SIL Open Font License), self-hosted by next/font at
-// build time, so the show also runs with no internet at the venue.
+// All faces are SIL Open Font License, self-hosted at build time, so the show
+// also runs with no internet at the venue.
+//
+// The period faces come from src/fonts/, built by scripts/czech-fonts.py: the
+// complete IM Fell fonts (Google serves them cut down to basic Latin, which
+// drops č ř ě ů…), and Tangerine and UnifrakturMaguntia with the Czech letters
+// they lack composed from their own accents.
 
-const fellEnglish = IM_Fell_English({
-  weight: "400",
-  style: ["normal", "italic"],
-  subsets: ["latin"],
+const fellEnglish = localFont({
+  src: [
+    { path: "../fonts/fell-english-normal.woff2", weight: "400", style: "normal" },
+    { path: "../fonts/fell-english-italic.woff2", weight: "400", style: "italic" },
+  ],
   display: "block",
   variable: "--font-fell",
 });
-const fellPica = IM_Fell_DW_Pica({
-  weight: "400",
-  style: ["normal", "italic"],
-  subsets: ["latin"],
+const fellPica = localFont({
+  src: [
+    { path: "../fonts/fell-dw-pica-normal.woff2", weight: "400", style: "normal" },
+    { path: "../fonts/fell-dw-pica-italic.woff2", weight: "400", style: "italic" },
+  ],
   display: "block",
   preload: false,
 });
-const fellCanon = IM_Fell_French_Canon({
-  weight: "400",
-  style: ["normal", "italic"],
-  subsets: ["latin"],
+const fellCanon = localFont({
+  src: [
+    { path: "../fonts/fell-french-canon-normal.woff2", weight: "400", style: "normal" },
+    { path: "../fonts/fell-french-canon-italic.woff2", weight: "400", style: "italic" },
+  ],
   display: "block",
   preload: false,
 });
-const fellDouble = IM_Fell_Double_Pica({
-  weight: "400",
-  style: ["normal", "italic"],
-  subsets: ["latin"],
+const fellDouble = localFont({
+  src: [
+    { path: "../fonts/fell-double-pica-normal.woff2", weight: "400", style: "normal" },
+    { path: "../fonts/fell-double-pica-italic.woff2", weight: "400", style: "italic" },
+  ],
   display: "block",
   preload: false,
 });
@@ -71,16 +75,17 @@ const cinzelDeco = Cinzel_Decorative({
   display: "block",
   preload: false,
 });
-// renaissance calligraphy; the bold cut, as the regular's hairlines vanish on a big screen
-const tangerine = Tangerine({
-  weight: "700",
-  subsets: ["latin"],
+// renaissance calligraphy; the bold cut (registered as 400, the weight the stage
+// draws), as the regular's hairlines vanish on a big screen
+const tangerine = localFont({
+  src: "../fonts/tangerine-normal.woff2",
+  weight: "400",
   display: "block",
   preload: false,
 });
-const fraktur = UnifrakturMaguntia({
+const fraktur = localFont({
+  src: "../fonts/unifraktur-normal.woff2",
   weight: "400",
-  subsets: ["latin"],
   display: "block",
   preload: false,
 });
@@ -133,16 +138,16 @@ export interface FontDef {
 }
 
 export const FONTS: FontDef[] = [
-  { id: "fell-english", label: "Fell English", note: "1670s Oxford type", family: fellEnglish.style.fontFamily, hasItalic: true, czech: false },
-  { id: "fell-pica", label: "Fell DW Pica", note: "First Folio texture", family: fellPica.style.fontFamily, hasItalic: true, czech: false },
-  { id: "fell-canon", label: "Fell French Canon", note: "Large display Fell", family: fellCanon.style.fontFamily, hasItalic: true, czech: false },
-  { id: "fell-double", label: "Fell Double Pica", note: "Rough, inky", family: fellDouble.style.fontFamily, hasItalic: true, czech: false },
+  { id: "fell-english", label: "Fell English", note: "1670s Oxford type", family: fellEnglish.style.fontFamily, hasItalic: true, czech: true },
+  { id: "fell-pica", label: "Fell DW Pica", note: "First Folio texture", family: fellPica.style.fontFamily, hasItalic: true, czech: true },
+  { id: "fell-canon", label: "Fell French Canon", note: "Large display Fell", family: fellCanon.style.fontFamily, hasItalic: true, czech: true },
+  { id: "fell-double", label: "Fell Double Pica", note: "Rough, inky", family: fellDouble.style.fontFamily, hasItalic: true, czech: true },
   { id: "cormorant", label: "Cormorant", note: "Elegant Garalde", family: cormorant.style.fontFamily, hasItalic: true, czech: true },
   { id: "garamond", label: "EB Garamond", note: "Renaissance classic", family: garamond.style.fontFamily, hasItalic: true, czech: true },
   { id: "cinzel", label: "Cinzel", note: "Roman capitals", family: cinzel.style.fontFamily, hasItalic: false, czech: true },
   { id: "cinzel-decorative", label: "Cinzel Decorative", note: "Monumental theatre capitals", family: cinzelDeco.style.fontFamily, hasItalic: false, czech: true },
-  { id: "tangerine", label: "Tangerine", note: "Renaissance calligraphy", family: tangerine.style.fontFamily, hasItalic: false, czech: false },
-  { id: "fraktur", label: "Unifraktur", note: "Blackletter", family: fraktur.style.fontFamily, hasItalic: false, czech: false },
+  { id: "tangerine", label: "Tangerine", note: "Renaissance calligraphy", family: tangerine.style.fontFamily, hasItalic: false, czech: true },
+  { id: "fraktur", label: "Unifraktur", note: "Blackletter", family: fraktur.style.fontFamily, hasItalic: false, czech: true },
   { id: "inter", label: "Inter", note: "Neutral modern sans", family: inter.style.fontFamily, hasItalic: true, czech: true },
   { id: "dm-sans", label: "DM Sans", note: "Soft geometric sans", family: dmSans.style.fontFamily, hasItalic: true, czech: true },
   { id: "space-grotesk", label: "Space Grotesk", note: "Quirky grotesque", family: spaceGrotesk.style.fontFamily, hasItalic: false, czech: true },
