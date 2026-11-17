@@ -39,6 +39,7 @@ export default function LivePanel({ live, onLive, configured, script, fontFamily
   const [provisional, setProvisional] = useState("");
   const [level, setLevel] = useState(0);
   const session = useRef<LiveTranscriber | null>(null);
+  const spoken = useRef<string[]>([]);
   const transcriptRef = useRef<HTMLDivElement>(null);
 
   const refreshMics = useCallback(() => {
@@ -69,11 +70,31 @@ export default function LivePanel({ live, onLive, configured, script, fontFamily
 
   const startTest = () => {
     setHeard([]);
+    spoken.current = [];
     setProvisional("");
     const t = new LiveTranscriber(
       live,
       {
-        onWords: ({ words, pause }) => setHeard((h) => [...h, ...words, ...(pause && words.length ? ["\n"] : [])].slice(-160)),
+        onWords: ({ words, pause }) => {
+          spoken.current.push(...words);
+          setHeard((h) => [...h, ...words, ...(pause && words.length ? ["\n"] : [])].slice(-160));
+        },
+        onCorrect: ({ index, word }) => {
+          // find the word among the last ones shown (line breaks are not words)
+          const back = spoken.current.length - index;
+          spoken.current[index] = word;
+          setHeard((h) => {
+            const next = [...h];
+            for (let i = next.length - 1, n = 0; i >= 0; i--) {
+              if (next[i] === "\n") continue;
+              if (++n === back) {
+                next[i] = word;
+                break;
+              }
+            }
+            return next;
+          });
+        },
         onStatus: (s) => {
           setStatus(s);
           if (s.state === "error") {
@@ -161,6 +182,21 @@ export default function LivePanel({ live, onLive, configured, script, fontFamily
       <p className="note">
         Gives Soniox the text from the Script tab as context, so names, quotations and archaic words are recognised. Paste a
         Czech translation there if the speaker will quote it (the built-in English presets are only sent for English).
+      </p>
+
+      <button
+        role="switch"
+        aria-checked={live.instant}
+        className={`toggle ${live.instant ? "is-on" : ""}`}
+        onClick={() => set("instant", !live.instant)}
+      >
+        <span className="toggle__box" />
+        <span className="toggle__label">Instant words</span>
+      </button>
+      <p className="note">
+        {live.instant
+          ? "Words appear as soon as they are heard, and the newest word is corrected if Soniox changes its mind."
+          : "Words appear only once Soniox is sure of them: exact, but a second or two behind the voice."}
       </p>
 
       <div className="live__test">

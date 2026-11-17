@@ -54,7 +54,11 @@ export default function StageView({ text, settings, source, live, onExit }: Prop
   // live speech: the microphone drives the show
   useEffect(() => {
     if (!isLive) return;
-    const t = new LiveTranscriber(live, { onWords: (b) => stageRef.current?.appendLive(b), onStatus: setLiveStatus }, scriptContext(text, live));
+    const t = new LiveTranscriber(live, {
+        onWords: (b) => stageRef.current?.appendLive(b),
+        onCorrect: (c) => stageRef.current?.correctLive(c.index, c.word),
+        onStatus: setLiveStatus,
+      }, scriptContext(text, live));
     void t.start();
     return () => t.stop();
     // one session per show (or per retry)

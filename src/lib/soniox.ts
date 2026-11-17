@@ -21,10 +21,16 @@ export interface LiveConfig {
   deviceId: string;
   /** Hand the script to Soniox as context so its vocabulary is recognised. */
   primeWithScript: boolean;
+  /**
+   * Put words on stage from Soniox's provisional hypothesis, within a few
+   * hundred milliseconds, and correct them if the final text differs. Off:
+   * wait for final words only (exact, but a second or two behind the voice).
+   */
+  instant: boolean;
 }
 
 /** Tuned for a Czech-speaking stage: Czech recognition, restricted to Czech. */
-export const DEFAULT_LIVE: LiveConfig = { language: "cs", deviceId: "", primeWithScript: true };
+export const DEFAULT_LIVE: LiveConfig = { language: "cs", deviceId: "", primeWithScript: true, instant: true };
 
 export const LANGUAGES: { code: string; label: string }[] = [
   { code: "cs", label: "Čeština (Czech)" },
@@ -85,58 +91,140 @@ export interface WordBatch {
   pause: boolean;
 }
 
+/** A word already on stage that Soniox has since heard differently. */
+export interface WordCorrection {
+  /** Position of the word in the whole live session (0 = first word released). */
+  index: number;
+  word: string;
+}
+
 /**
- * Soniox sends sub-word tokens ("do", "ing", "?") and separate spaces. Final
- * tokens arrive once and never change; non-final ones are a provisional tail
- * that is re-sent with every response. A word is ready for the stage once it
- * is confirmed and something after it shows it has ended: a space, or the
- * end of an utterance.
+ * Soniox sends sub-word tokens ("do", "ing", "?") with spaces attached to the
+ * start of the next token. Final tokens arrive once and never change, but
+ * only after a delay of a second or more; non-final tokens are a provisional
+ * tail that is re-sent (and sometimes revised) with every response, a few
+ * hundred milliseconds after the sound.
+ *
+ * In instant mode a word is released as soon as it is complete in the
+ * provisional hypothesis (the next word has started), and corrected later if
+ * the final text disagrees. In confirmed mode only final words are released.
  */
 export class WordAssembler {
-  private pending = "";
+  /** Final text of the current utterance not yet trimmed away. */
+  private final = "";
+  /** Words of the current hypothesis already released (aligned with `final`). */
+  private released: string[] = [];
+  /** Global index of released[0]. */
+  private base = 0;
+  /** The latest non-final tail, for flush(). */
+  private tail = "";
 
-  feed(tokens: SonioxToken[]): WordBatch & { provisional: string } {
+  private readonly instant: boolean;
+
+  constructor(instant = true) {
+    this.instant = instant;
+  }
+
+  feed(tokens: SonioxToken[]): WordBatch & { provisional: string; corrections: WordCorrection[] } {
     let pause = false;
+    let fin = false;
     let tail = "";
     for (const t of tokens) {
       if (t.text === "<end>" || t.text === "<fin>") {
-        if (t.is_final) pause = true;
+        if (t.is_final) {
+          if (t.text === "<end>") pause = true;
+          else fin = true;
+        }
         continue;
       }
-      if (t.is_final) this.pending += t.text.normalize("NFC");
+      if (t.is_final) this.final += t.text.normalize("NFC");
       else tail += t.text.normalize("NFC");
     }
+    this.tail = tail;
 
-    const words: string[] = [];
-    const cut = this.pending.search(/\s\S*$/);
-    if (cut >= 0) {
-      words.push(...this.pending.slice(0, cut).split(/\s+/).filter(Boolean));
-      this.pending = this.pending.slice(cut).trimStart();
+    // how much of the final text is made of finished words
+    const finalWords = this.final.split(/\s+/).filter(Boolean);
+    const finalEnded = pause || fin || /\s$/.test(this.final) || /^\s/.test(tail);
+    const finalComplete = finalEnded ? finalWords.length : Math.max(0, finalWords.length - 1);
+
+    const hyp = this.instant ? this.final + tail : this.final;
+    const words = hyp.split(/\s+/).filter(Boolean);
+    const hypEnded = this.instant ? pause || fin || /\s$/.test(hyp) : finalEnded;
+    const complete = hypEnded ? words.length : Math.max(0, words.length - 1);
+
+    // words already shown that the final text now says otherwise
+    const corrections: WordCorrection[] = [];
+    for (let i = 0; i < Math.min(this.released.length, finalComplete); i++) {
+      if (this.released[i] !== finalWords[i]) {
+        this.released[i] = finalWords[i];
+        corrections.push({ index: this.base + i, word: finalWords[i] });
+      }
     }
-    // the word is over if the speaker paused, or the provisional tail starts a new one
-    if (this.pending && (pause || /^\s/.test(tail))) words.push(...this.flush());
-    return { words, pause, provisional: `${this.pending}${tail}`.trim() };
+
+    const out: string[] = [];
+    for (let i = this.released.length; i < complete; i++) {
+      this.released.push(words[i]);
+      out.push(words[i]);
+    }
+
+    // forget confirmed words so the text never grows without bound
+    if (pause) {
+      this.base += this.released.length;
+      this.final = "";
+      this.released = [];
+    } else if (finalComplete > 0 && this.released.length >= finalComplete) {
+      this.final = this.final.replace(new RegExp(`^(\\s*\\S+){${finalComplete}}`), "");
+      this.released.splice(0, finalComplete);
+      this.base += finalComplete;
+    }
+
+    const rest = (this.instant ? `${this.final}${tail}` : this.final).split(/\s+/).filter(Boolean).slice(this.released.length);
+    const provisional = this.instant ? rest.join(" ") : `${rest.join(" ")}${tail}`.trim();
+    return { words: out, pause, provisional, corrections };
   }
 
   get hasPending() {
-    return this.pending.trim().length > 0;
+    return this.pendingWords().length > 0;
   }
 
+  /** Anything heard that Soniox has not yet confirmed. */
+  get unconfirmed() {
+    return this.hasPending || this.tail.trim().length > 0 || this.released.length > 0;
+  }
+
+  /**
+   * Release whatever is left, as if the speaker had stopped. The words stay
+   * tracked, so if final tokens for them arrive later they become
+   * corrections rather than repeats.
+   */
   flush(): string[] {
-    const w = this.pending.trim().split(/\s+/).filter(Boolean);
-    this.pending = "";
+    const w = this.pendingWords();
+    this.released.push(...w);
     return w;
+  }
+
+  /** Start over (a new connection): nothing pending, nothing to correct. */
+  reset() {
+    this.base += this.released.length;
+    this.final = "";
+    this.tail = "";
+    this.released = [];
+  }
+
+  private pendingWords() {
+    const hyp = this.instant ? this.final + this.tail : this.final;
+    return hyp.split(/\s+/).filter(Boolean).slice(this.released.length);
   }
 }
 
 // ───────────────────────────── microphone ─────────────────────────────
 
-/** Runs on the audio thread: float samples → ~100 ms chunks of 16-bit PCM. */
+/** Runs on the audio thread: float samples → ~50 ms chunks of 16-bit PCM. */
 const WORKLET = `
 class SonioxTap extends AudioWorkletProcessor {
   constructor() {
     super();
-    this.size = Math.round(sampleRate / 10);
+    this.size = Math.round(sampleRate / 20);
     this.buf = new Int16Array(this.size);
     this.n = 0;
     this.peak = 0;
@@ -188,12 +276,17 @@ export async function sonioxConfigured(): Promise<boolean> {
 
 export interface LiveCallbacks {
   onWords: (batch: WordBatch) => void;
+  /** A word already released was heard differently once Soniox confirmed it. */
+  onCorrect?: (c: WordCorrection) => void;
   onStatus?: (s: LiveStatus) => void;
   /** Confirmed-but-unfinished + provisional text: what's being said right now. */
   onProvisional?: (text: string) => void;
-  /** Input peak level 0..1, about ten times a second. */
+  /** Input peak level 0..1, about twenty times a second. */
   onLevel?: (peak: number) => void;
 }
+
+/** Silence (no change in what Soniox hears) before forcing finalisation. */
+const FINALIZE_AFTER_MS = 450;
 
 /** Errors that a fresh connection will not fix. */
 const FATAL = new Set([400, 401, 402]);
@@ -202,7 +295,7 @@ export class LiveTranscriber {
   private readonly config: LiveConfig;
   private readonly context: string;
   private readonly cb: LiveCallbacks;
-  private readonly words = new WordAssembler();
+  private readonly words: WordAssembler;
 
   private stream: MediaStream | null = null;
   private audio: AudioContext | null = null;
@@ -212,13 +305,17 @@ export class LiveTranscriber {
   private retries = 0;
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
   private idleTimer: ReturnType<typeof setTimeout> | null = null;
+  private flushTimer: ReturnType<typeof setTimeout> | null = null;
+  private keepaliveTimer: ReturnType<typeof setInterval> | null = null;
   private status: LiveStatus = { state: "idle" };
+  private lastProvisional = "";
 
   /** `context` is the text to prime recognition with; see scriptContext(). */
   constructor(config: LiveConfig, callbacks: LiveCallbacks, context = "") {
     this.config = config;
     this.cb = callbacks;
     this.context = context.trim().slice(0, CONTEXT_CHARS);
+    this.words = new WordAssembler(config.instant);
   }
 
   get state() {
@@ -242,8 +339,7 @@ export class LiveTranscriber {
   stop() {
     if (this.stopped) return;
     this.stopped = true;
-    if (this.retryTimer) clearTimeout(this.retryTimer);
-    if (this.idleTimer) clearTimeout(this.idleTimer);
+    this.clearTimers();
     const ws = this.ws;
     this.ws = null;
     this.wsReady = false;
@@ -342,6 +438,9 @@ export class LiveTranscriber {
       if (this.context) start.context = { text: this.context };
       ws.send(JSON.stringify(start));
       this.wsReady = true;
+      // keep the stream alive through long silences on stage
+      if (this.keepaliveTimer) clearInterval(this.keepaliveTimer);
+      this.keepaliveTimer = setInterval(() => this.sendControl("keepalive"), 8000);
       this.retries = 0;
       this.setStatus({ state: "listening" });
     };
@@ -366,7 +465,9 @@ export class LiveTranscriber {
       if (ws !== this.ws) return;
       this.wsReady = false;
       this.ws = null;
+      this.clearTimers();
       this.release(this.words.flush(), true);
+      this.words.reset();
       if (this.stopped) return;
       if (fatal) {
         this.fail(this.status.message ?? "Soniox closed the connection.", true);
@@ -377,18 +478,43 @@ export class LiveTranscriber {
   }
 
   private handleTokens(tokens: SonioxToken[]) {
-    const { words, pause, provisional } = this.words.feed(tokens);
+    const { words, pause, provisional, corrections } = this.words.feed(tokens);
+    corrections.forEach((c) => this.cb.onCorrect?.(c));
     this.release(words, pause);
     this.cb.onProvisional?.(provisional);
 
-    // fallback for a trailing word that never gets a space or an endpoint
+    // Soniox sends a response for every chunk of audio; an unchanged
+    // hypothesis means the speaker has stopped for now
+    const changed = provisional !== this.lastProvisional || words.length > 0;
+    this.lastProvisional = provisional;
+    if (!changed && this.idleTimer) return;
     if (this.idleTimer) clearTimeout(this.idleTimer);
-    if (this.words.hasPending) {
-      this.idleTimer = setTimeout(() => {
-        this.release(this.words.flush(), true);
+    if (this.flushTimer) clearTimeout(this.flushTimer);
+    this.idleTimer = this.flushTimer = null;
+    if (!this.words.unconfirmed) return;
+
+    // A short silence: ask Soniox to finalise now rather than wait for its
+    // endpoint detection, so the last word lands and is confirmed at once.
+    this.idleTimer = setTimeout(() => {
+      this.sendControl("finalize");
+      // and if even that never comes back, release the word anyway
+      this.flushTimer = setTimeout(() => {
+        this.release(this.words.flush(), false);
         this.cb.onProvisional?.("");
-      }, 1400);
-    }
+      }, 900);
+    }, FINALIZE_AFTER_MS);
+  }
+
+  private sendControl(type: "finalize" | "keepalive") {
+    if (this.wsReady && this.ws?.readyState === WebSocket.OPEN) this.ws.send(JSON.stringify({ type }));
+  }
+
+  private clearTimers() {
+    if (this.retryTimer) clearTimeout(this.retryTimer);
+    if (this.idleTimer) clearTimeout(this.idleTimer);
+    if (this.flushTimer) clearTimeout(this.flushTimer);
+    if (this.keepaliveTimer) clearInterval(this.keepaliveTimer);
+    this.retryTimer = this.idleTimer = this.flushTimer = this.keepaliveTimer = null;
   }
 
   private release(words: string[], pause: boolean) {

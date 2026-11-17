@@ -37,6 +37,8 @@ Instead of a prepared script, the words can come from live speech: pick **Live s
 
 In *Line* and *Page* modes, live words are set left to right as they are spoken; a pause starts a new line, and the page departs when it is full. *Word* mode works as usual, and *Leave on its own after* clears the stage when the speaker pauses. If the connection drops, it reconnects by itself; the HUD shows the state.
 
+**Instant words** (on by default) puts each word on stage from Soniox's provisional hypothesis, a few hundred milliseconds after it is spoken, instead of waiting a second or two for Soniox to confirm it. If the confirmed text differs, the newest word is swapped in place. When the speaker stops for about half a second the app asks Soniox to finalise straight away, so the last word of a phrase does not hang. Turn it off to show only confirmed words. The entrance effect also adds to the delay you feel: a short *Entrance* duration makes words land sooner.
+
 Live speech needs internet at the venue. Scripts do not.
 
 ## The two steps

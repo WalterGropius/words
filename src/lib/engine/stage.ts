@@ -143,6 +143,8 @@ export class Stage {
   private liveBreak = false;
   private liveFont = 0;
   private livePageAt = 0;
+  /** Layout state just before the last live word was set, so it can be re-set. */
+  private liveUndo: { ti: number; row: number; x: number; brk: boolean; page: number; prevLevel: number | null } | null = null;
 
   constructor(canvas: HTMLCanvasElement, settings: Settings, opts: StageOptions = {}) {
     this.canvas = canvas;
@@ -200,6 +202,7 @@ export class Stage {
     this.cursor = -1;
     this.pageIndex = -1;
     this.liveRow = -1;
+    this.liveUndo = null;
     this.liveBreak = false;
     this.ready = true;
     this.emit();
@@ -232,6 +235,57 @@ export class Stage {
     }
     if (batch.pause) this.liveBreak = true;
     if (batch.words.length) this.emit();
+  }
+
+  /**
+   * Live speech: a word already on stage was heard differently once Soniox
+   * confirmed it. The newest word is swapped in place; older ones have been
+   * looked at already, so they stay as they are.
+   */
+  correctLive(index: number, raw: string) {
+    if (!this.opts.live || this.disposed) return;
+    if (!this.ready) {
+      // still queued: patch the queue instead
+      let i = index;
+      for (const b of this.liveQueue) {
+        if (i < b.words.length) {
+          b.words[i] = raw;
+          return;
+        }
+        i -= b.words.length;
+      }
+      return;
+    }
+    const token = this.parsed.tokens[index];
+    if (!token) return;
+    const s = this.settings;
+    const text = styleWord(raw, { caps: s.caps, longS: s.longS });
+    if (token.text === text) return;
+    token.text = text;
+    if (index !== this.parsed.tokens.length - 1) return;
+
+    if (s.mode === "word") {
+      if (!this.current) return;
+      this.current.fadeTo(0, 0.12, true);
+      this.current = this.spawnWord(index, this.enterOptions());
+      return;
+    }
+    const u = this.liveUndo;
+    const old = this.lit.get(index);
+    if (!u || u.ti !== index || u.page !== this.pageIndex || !old) return;
+    old.fadeTo(0, 0.12, true);
+    this.lit.delete(index);
+    // a pause that came after the word still applies after its replacement
+    const pauseAfter = this.liveBreak;
+    this.liveRow = u.row;
+    this.liveX = u.x;
+    this.liveBreak = u.brk;
+    this.placeLiveWord(index);
+    this.liveBreak = this.liveBreak || pauseAfter;
+    if (u.prevLevel !== null) {
+      const prev = this.lit.get(index - 1);
+      if (prev) prev.level = u.prevLevel;
+    }
   }
 
   /** Live settings; anything affecting layout restarts from black. */
@@ -307,6 +361,7 @@ export class Stage {
     this.cursor = this.opts.live ? this.parsed.tokens.length - 1 : -1;
     this.pageIndex = -1;
     this.liveRow = -1;
+    this.liveUndo = null;
     this.liveBreak = false;
     this.emit();
   }
@@ -552,6 +607,8 @@ export class Stage {
     };
 
     const text = this.parsed.tokens[ti].text;
+    const prevActor = this.lit.get(ti - 1);
+    const undo = { ti, row: this.liveRow, x: this.liveX, brk: this.liveBreak, page0: this.pageIndex, prevLevel: prevActor ? prevActor.level : null };
     if (this.liveRow < 0) startPage(0);
     let f = this.liveFont;
     let width = measureText(text, this.font, f);
@@ -585,6 +642,8 @@ export class Stage {
     const a = this.makeActor(text, f, new Vector3(x, y, 0), 1, this.pagePhase(ti));
     a.beginEnter(this.enterOptions(Math.max(0, this.livePageAt - this.time)), this.env());
     this.lit.set(ti, a);
+    // undoable only while the word is still on the page it started on
+    this.liveUndo = this.pageIndex === undo.page0 ? { ti, row: undo.row, x: undo.x, brk: undo.brk, page: this.pageIndex, prevLevel: undo.prevLevel } : null;
   }
 
   /** Send the whole page off in a reading-order wave. */
