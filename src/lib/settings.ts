@@ -1,8 +1,8 @@
 import type { FontId } from "./fonts";
 
 export type Mode = "word" | "line" | "page" | "paragraph";
-export type Entrance = "fade" | "quill" | "arrive" | "rise" | "materialize";
-export type Exit = "drift" | "fall" | "rise" | "dissolve" | "scatter" | "fade";
+export type Entrance = "nebula" | "fade" | "quill" | "arrive" | "rise" | "materialize";
+export type Exit = "smoke" | "drift" | "fall" | "rise" | "dissolve" | "scatter" | "fade";
 export type Align = "center" | "left";
 export type Source = "script" | "voice";
 
@@ -19,7 +19,7 @@ export interface Settings {
   maxPageLines: number; // page mode
   paragraphLines: number; // paragraph mode: lines before a new paragraph begins
   paragraphWidth: number; // paragraph mode: 0.25..0.7 of the stage width
-  paragraphLinger: number; // paragraph mode: seconds a word stays before it starts to fade
+  paragraphLinger: number; // paragraph mode: seconds a word stays readable, once formed, before it starts to leave
   paragraphFade: number; // paragraph mode: seconds a word takes to leave
   paragraphOnPause: boolean; // paragraph mode, voice: a pause in speech starts a new paragraph
   stanzaBreaks: boolean;
@@ -65,17 +65,19 @@ export const DEFAULT_SETTINGS: Settings = {
   liveTranscript: true,
   banned: DEFAULT_BANNED,
 
-  mode: "word",
+  // the director's brief: words appear out of a cosmic nebula, stay readable
+  // for a second or two, then dissolve like smoke carried off by a draft
+  mode: "paragraph",
   linesAtOnce: 1,
   maxPageLines: 14,
   paragraphLines: 4,
   paragraphWidth: 0.42,
-  paragraphLinger: 4,
-  paragraphFade: 1.5,
+  paragraphLinger: 1.75,
+  paragraphFade: 3,
   paragraphOnPause: true,
   stanzaBreaks: true,
   ghost: 0,
-  spokenLevel: 0.55,
+  spokenLevel: 0.6,
   align: "center",
   jitter: 0.35,
   autoExit: 0,
@@ -86,12 +88,12 @@ export const DEFAULT_SETTINGS: Settings = {
   longS: false,
   size: 1,
 
-  entrance: "fade",
-  entranceDuration: 1.1,
+  entrance: "nebula",
+  entranceDuration: 1.4,
   entranceStagger: 0.35,
 
-  exit: "fall",
-  exitDuration: 6,
+  exit: "smoke",
+  exitDuration: 3,
   exitStagger: 0.4,
   gravity: 0.3,
   turbulence: 0.45,
@@ -119,6 +121,20 @@ export interface Look {
 }
 
 export const LOOKS: Look[] = [
+  {
+    id: "nebula",
+    name: "Nebula",
+    blurb: "Out of a cosmic nebula, gone again like smoke on a draft",
+    settings: {
+      mode: "paragraph",
+      entrance: "nebula",
+      exit: "smoke",
+      paragraphLinger: 1.75,
+      paragraphFade: 3,
+      spokenLevel: 0.6,
+      entranceDuration: 1.4,
+    },
+  },
   {
     id: "leaves",
     name: "Autumn",
@@ -169,7 +185,13 @@ export const LOOKS: Look[] = [
   },
 ];
 
-const STORAGE_KEY = "words.v1";
+/**
+ * v2 made the nebula look the default. Staging saved under v1 is dropped so
+ * everyone starts from it; the text and the voice setup are carried over.
+ */
+const STORAGE_KEY = "words.v2";
+const LEGACY_KEY = "words.v1";
+const CARRIED_OVER = ["source", "language", "liveTranscript", "banned"] as const;
 
 export interface Persisted {
   text: string;
@@ -179,7 +201,7 @@ export interface Persisted {
 export function loadPersisted(): Partial<Persisted> {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return {};
+    if (!raw) return loadLegacy();
     const parsed = JSON.parse(raw) as Partial<Persisted>;
     return {
       text: typeof parsed.text === "string" ? parsed.text : undefined,
@@ -188,6 +210,16 @@ export function loadPersisted(): Partial<Persisted> {
   } catch {
     return {};
   }
+}
+
+function loadLegacy(): Partial<Persisted> {
+  const raw = localStorage.getItem(LEGACY_KEY);
+  if (!raw) return {};
+  const parsed = JSON.parse(raw) as Partial<Persisted>;
+  const old = (parsed.settings ?? {}) as Partial<Settings>;
+  const settings: Settings = { ...DEFAULT_SETTINGS };
+  for (const k of CARRIED_OVER) if (old[k] !== undefined) (settings as unknown as Record<string, unknown>)[k] = old[k];
+  return { text: typeof parsed.text === "string" ? parsed.text : undefined, settings };
 }
 
 export function savePersisted(p: Persisted) {

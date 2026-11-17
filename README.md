@@ -54,11 +54,13 @@ In Line and Page mode, spoken words are written left to right into the frame. A 
 - **Word**: one word at a time, centre stage. Each press sends the previous word off with the exit effect. Because exits are slow, several words drift at once.
 - **Line**: words light up in place along the verse line. When the line is done, it departs.
 - **Page**: the whole passage waits in shadow ("Unspoken words") and is revealed word by word. Spoken words dim so the current word holds the light.
-- **Paragraph**: words gather into a paragraph at a random spot on the stage. When it is full (or, with voice, at a pause once it has a few words; with a script, at a new stanza), the next paragraph begins somewhere else, never overlapping the last one. Each word starts to leave with the chosen exit effect a set time after it appears ("Each word stays for", 4 s by default), so a paragraph fades away behind the words still being written. You can set the lines per paragraph, its width, how long words stay and how fast they fade.
+- **Paragraph** (the default): words gather into a paragraph at a random spot on the stage. When it is full (or, with voice, at a pause once it has a few words; with a script, at a new stanza), the next paragraph begins somewhere else, never overlapping the last one. Once a word has formed it stays readable for a set time ("Each word stays readable for", 1.75 s by default), then leaves with the chosen exit effect ("Then leaves over", 3 s), so a paragraph clears away behind the words still being written. You can set the lines per paragraph, its width, how long words stay and how fast they leave.
 
-**Entrances:** Ink (soft-focus bleed), Quill (written left to right with a glowing nib), Rise, Arrive (letters fly in from the dark), Gather (particles condense into the word).
+**The default look, Nebula**, follows the director's brief: each word appears out of a cosmic nebula that looks and behaves like smoke, is readable for a second or two, then thins into smoke that a draft carries off until it is gone, clearing the view for the words after it. **Restore default staging** in setup brings it back. Staging saved by an older version is reset to it once; the text and voice settings are kept.
 
-**Exits:** Fall (gentle gravity, tumbling like leaves), Ascend (embers), Recede (sinks back into the dark), Dissolve (burns to dust on a breeze), Scatter (3D burst), Fade.
+**Entrances:** Nebula (condenses out of a soft cosmic cloud), Ink (soft-focus bleed), Quill (written left to right with a glowing nib), Rise, Arrive (letters fly in from the dark), Gather (particles condense into the word).
+
+**Exits:** Smoke (thins into smoke carried off on a draft), Fall (gentle gravity, tumbling like leaves), Ascend (embers), Recede (sinks back into the dark), Dissolve (burns to dust on a breeze), Scatter (3D burst), Fade.
 
 **Atmosphere:** glow, breathing, camera drift, stage dust, and optional film grain. With grain off, the background stays true black (0,0,0), so you can composite it with a screen or add blend.
 

@@ -48,6 +48,7 @@ const LANGUAGES: { value: string; label: string }[] = [
 ];
 
 const ENTRANCES: { value: Entrance; label: string }[] = [
+  { value: "nebula", label: "Nebula" },
   { value: "fade", label: "Ink" },
   { value: "quill", label: "Quill" },
   { value: "rise", label: "Rise" },
@@ -56,6 +57,7 @@ const ENTRANCES: { value: Entrance; label: string }[] = [
 ];
 
 const EXITS: { value: Exit; label: string }[] = [
+  { value: "smoke", label: "Smoke" },
   { value: "fall", label: "Fall" },
   { value: "rise", label: "Ascend" },
   { value: "drift", label: "Recede" },
@@ -65,6 +67,7 @@ const EXITS: { value: Exit; label: string }[] = [
 ];
 
 const ENTRANCE_NOTES: Record<Entrance, string> = {
+  nebula: "Condenses out of a soft cosmic cloud, like smoke gathering into letters.",
   fade: "Bleeds in from soft focus, like wet ink.",
   quill: "Written left to right with a glowing nib.",
   rise: "Lifts gently into place.",
@@ -73,6 +76,7 @@ const ENTRANCE_NOTES: Record<Entrance, string> = {
 };
 
 const EXIT_NOTES: Record<Exit, string> = {
+  smoke: "Thins into smoke that a draft carries off, curling and spreading until it's gone.",
   fall: "Letters loosen and drift down under a gentle gravity.",
   rise: "Letters float upward like embers and smoke.",
   drift: "The word sinks back into the darkness, out of focus.",
@@ -279,8 +283,8 @@ export default function Setup({ text, onText, settings, onSettings, onPlay }: Pr
               <>
                 <Slider label="Lines per paragraph" value={s.paragraphLines} min={2} max={10} step={1} onChange={(v) => set("paragraphLines", v)} format={(v) => `${v}`} />
                 <Slider label="Paragraph width" value={s.paragraphWidth} min={0.25} max={0.7} step={0.01} onChange={(v) => set("paragraphWidth", v)} format={pct} />
-                <Slider label="Each word stays for" value={s.paragraphLinger} min={0.5} max={20} step={0.5} onChange={(v) => set("paragraphLinger", v)} format={secs} />
-                <Slider label="Then fades over" value={s.paragraphFade} min={0.3} max={4} step={0.1} onChange={(v) => set("paragraphFade", v)} format={secs} />
+                <Slider label="Each word stays readable for" value={s.paragraphLinger} min={0.25} max={20} step={0.25} onChange={(v) => set("paragraphLinger", v)} format={secs} />
+                <Slider label="Then leaves over" value={s.paragraphFade} min={0.3} max={6} step={0.1} onChange={(v) => set("paragraphFade", v)} format={secs} />
                 <Slider label="Spoken words" value={s.spokenLevel} min={0.1} max={1} step={0.01} onChange={(v) => set("spokenLevel", v)} format={pct} />
                 <div className="row">
                   {voice ? (
@@ -290,8 +294,8 @@ export default function Setup({ text, onText, settings, onSettings, onPlay }: Pr
                   )}
                 </div>
                 <p className="note">
-                  Each word starts to leave, with the exit effect below, a set time after it appears, so the paragraph fades away
-                  as it is being written. A new paragraph begins elsewhere when this one is full
+                  Each word forms with the entrance effect, stays readable for a set time, then leaves with the exit effect below,
+                  so the paragraph clears away as it is being written. A new paragraph begins elsewhere when this one is full
                   {voice ? ", or at a pause once it has a few words" : ""}.
                 </p>
               </>

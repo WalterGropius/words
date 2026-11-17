@@ -708,8 +708,8 @@ export class Stage {
     const a = this.makeActor(text, L.f, new Vector3(x, y, 0), 1, this.pagePhase(index));
     const delay = Math.max(0, L.hold - this.time);
     a.beginEnter(this.enterOptions(delay), this.env());
-    // the paragraph fades away behind the pen: each word leaves a while after it appears
-    if (s.mode === "paragraph") this.fadeAt.set(a, this.time + delay + s.paragraphLinger);
+    // the paragraph fades away behind the pen: each word, once formed, stays readable a moment, then leaves
+    if (s.mode === "paragraph") this.fadeAt.set(a, this.time + delay + s.entranceDuration + s.paragraphLinger);
     this.lit.set(index, a);
     this.lastLive = a;
     return { text, index, actor: a, frame: L, ...pen, count };
