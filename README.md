@@ -28,6 +28,8 @@ Instead of pressing a key for each word, the show can listen and put each word o
 
 The real key stays on the server. `/api/soniox-key` hands the browser a single-use key that expires in a minute. Whatever is in the text box goes to Soniox as a vocabulary hint. Voice needs an internet connection and Chrome, Edge or Firefox (Safari records audio in a format Soniox can't detect). For Czech, use Cormorant, EB Garamond, Cinzel, Inter, DM Sans or Space Grotesk: the Fell types and Unifraktur have no ř, ě or ů.
 
+**Never show these words** keeps hesitations and fillers off the stage (by default the Czech `hm, mhm, mm, ehm, eh, em, e, é, uh, uhm, um, ah, ehe`). Matching ignores case and punctuation, and treats repeated letters as one, so `hm` also catches `Hmmm,`. Words made only of punctuation are dropped too. The operator transcript still shows everything.
+
 **Live transcript** (on by default) puts each word on stage the moment Soniox hears it, written left to right as running sentences. Word mode uses two large lines, Line mode uses its line count, and Page mode a full page. If Soniox revises a word, only that word and those after it are rewritten. Turn it off to show only confirmed words. That is steadier, but Soniox often confirms only at the end of a sentence.
 
 In Line and Page mode, spoken words are written left to right into the frame. A pause in speech starts a new line, and a full frame departs like a page.
@@ -52,6 +54,7 @@ In Line and Page mode, spoken words are written left to right into the frame. A 
 - **Word**: one word at a time, centre stage. Each press sends the previous word off with the exit effect. Because exits are slow, several words drift at once.
 - **Line**: words light up in place along the verse line. When the line is done, it departs.
 - **Page**: the whole passage waits in shadow ("Unspoken words") and is revealed word by word. Spoken words dim so the current word holds the light.
+- **Paragraph**: words gather into a paragraph at a random spot on the stage. When it is full (or, with voice, at a pause once it has a few words; with a script, at a new stanza), the next paragraph begins somewhere else, never overlapping the last one, and the old one leaves quickly with the chosen exit effect. You can set the lines per paragraph, its width and how fast the old one leaves.
 
 **Entrances:** Ink (soft-focus bleed), Quill (written left to right with a glowing nib), Rise, Arrive (letters fly in from the dark), Gather (particles condense into the word).
 

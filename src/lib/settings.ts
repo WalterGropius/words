@@ -1,6 +1,6 @@
 import type { FontId } from "./fonts";
 
-export type Mode = "word" | "line" | "page";
+export type Mode = "word" | "line" | "page" | "paragraph";
 export type Entrance = "fade" | "quill" | "arrive" | "rise" | "materialize";
 export type Exit = "drift" | "fall" | "rise" | "dissolve" | "scatter" | "fade";
 export type Align = "center" | "left";
@@ -11,11 +11,16 @@ export interface Settings {
   source: Source; // script = pressed word by word, voice = live from the mic via Soniox
   language: string; // voice: ISO language hint, "" = detect
   liveTranscript: boolean; // voice: show words the moment they're heard, as flowing sentences
+  banned: string; // voice: comma-separated words never put on stage (fillers, hesitations)
 
   // Staging
   mode: Mode;
   linesAtOnce: number; // line mode
   maxPageLines: number; // page mode
+  paragraphLines: number; // paragraph mode: lines before a new paragraph begins
+  paragraphWidth: number; // paragraph mode: 0.25..0.7 of the stage width
+  paragraphFade: number; // paragraph mode: seconds for the old paragraph to leave
+  paragraphOnPause: boolean; // paragraph mode, voice: a pause in speech starts a new paragraph
   stanzaBreaks: boolean;
   ghost: number; // 0..0.4 opacity of words not yet spoken
   spokenLevel: number; // 0.15..1 brightness of words already spoken (verse modes)
@@ -50,14 +55,22 @@ export interface Settings {
   grain: number; // 0..0.15
 }
 
+/** Czech hesitations and fillers. */
+export const DEFAULT_BANNED = "hm, mhm, mm, ehm, eh, em, e, é, uh, uhm, um, ah, ehe";
+
 export const DEFAULT_SETTINGS: Settings = {
   source: "script",
   language: "cs",
   liveTranscript: true,
+  banned: DEFAULT_BANNED,
 
   mode: "word",
   linesAtOnce: 1,
   maxPageLines: 14,
+  paragraphLines: 4,
+  paragraphWidth: 0.42,
+  paragraphFade: 1.2,
+  paragraphOnPause: true,
   stanzaBreaks: true,
   ghost: 0,
   spokenLevel: 0.55,
@@ -93,6 +106,7 @@ export const MODE_DEFAULTS: Record<Mode, Partial<Settings>> = {
   word: {},
   line: { ghost: 0, spokenLevel: 0.6 },
   page: { ghost: 0.1, spokenLevel: 0.55 },
+  paragraph: { spokenLevel: 0.6 },
 };
 
 export interface Look {
@@ -132,6 +146,12 @@ export const LOOKS: Look[] = [
     name: "Tempest",
     blurb: "Arrive from the deep, shatter on the next",
     settings: { mode: "word", entrance: "arrive", exit: "scatter", exitDuration: 3.5, turbulence: 0.8, entranceDuration: 1.2 },
+  },
+  {
+    id: "scattered",
+    name: "Scattered",
+    blurb: "Paragraphs appear around the stage and burn away",
+    settings: { mode: "paragraph", entrance: "fade", exit: "dissolve", paragraphFade: 1.2, spokenLevel: 0.6, entranceDuration: 0.9 },
   },
   {
     id: "verse",

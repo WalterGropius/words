@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { FONTS } from "@/lib/fonts";
 import {
+  DEFAULT_BANNED,
   DEFAULT_SETTINGS,
   LOOKS,
   MODE_DEFAULTS,
@@ -28,6 +29,11 @@ const MODES: { value: Mode; label: string; blurb: string }[] = [
   { value: "word", label: "Word", blurb: "One word at a time, centre stage. Each press sends the last one away." },
   { value: "line", label: "Line", blurb: "Words light up in place along the verse line; the line departs when done." },
   { value: "page", label: "Page", blurb: "The whole passage waits in shadow and is revealed word by word." },
+  {
+    value: "paragraph",
+    label: "Paragraph",
+    blurb: "Words gather into a paragraph somewhere on the stage; the next begins elsewhere as the last one leaves.",
+  },
 ];
 
 const SOURCES: { value: Source; label: string }[] = [
@@ -150,6 +156,26 @@ export default function Setup({ text, onText, settings, onSettings, onPlay }: Pr
                   ? "Words appear the moment they're heard and run on as sentences across the stage. If Soniox changes its mind about a word, it's quietly rewritten."
                   : "Words appear only once Soniox is sure of them, often at the end of a sentence, and follow the Mode below."}
               </p>
+              <label className="voice__field">
+                <span className="voice__label">Never show these words</span>
+                <textarea
+                  className="voice__banned"
+                  rows={2}
+                  value={s.banned}
+                  onChange={(e) => set("banned", e.target.value)}
+                  spellCheck={false}
+                  placeholder="hm, ehm, eh, uh…"
+                />
+              </label>
+              <p className="note">
+                Hesitations and fillers, separated by commas. Drawn-out spellings count too: <em>hm</em> also catches <em>hmmm</em>,{" "}
+                <em>eh</em> catches <em>ehhh</em>. The transcript at the bottom still shows them.{" "}
+                {s.banned !== DEFAULT_BANNED && (
+                  <button className="voice__link" onClick={() => set("banned", DEFAULT_BANNED)}>
+                    Restore the Czech defaults
+                  </button>
+                )}
+              </p>
               <MicTest language={s.language} context={text} />
               <p className="note">
                 Words appear on stage as Soniox recognises them. The text below is sent along as a vocabulary hint, so names and
@@ -249,7 +275,26 @@ export default function Setup({ text, onText, settings, onSettings, onPlay }: Pr
             {s.mode === "page" && (
               <Slider label="Max lines per page" value={s.maxPageLines} min={4} max={24} step={1} onChange={(v) => set("maxPageLines", v)} format={(v) => `${v}`} />
             )}
-            {s.mode !== "word" && (
+            {s.mode === "paragraph" && (
+              <>
+                <Slider label="Lines per paragraph" value={s.paragraphLines} min={2} max={10} step={1} onChange={(v) => set("paragraphLines", v)} format={(v) => `${v}`} />
+                <Slider label="Paragraph width" value={s.paragraphWidth} min={0.25} max={0.7} step={0.01} onChange={(v) => set("paragraphWidth", v)} format={pct} />
+                <Slider label="Old paragraph leaves in" value={s.paragraphFade} min={0.3} max={4} step={0.1} onChange={(v) => set("paragraphFade", v)} format={secs} />
+                <Slider label="Spoken words" value={s.spokenLevel} min={0.1} max={1} step={0.01} onChange={(v) => set("spokenLevel", v)} format={pct} />
+                <div className="row">
+                  {voice ? (
+                    <Toggle label="New paragraph after a pause" value={s.paragraphOnPause} onChange={(v) => set("paragraphOnPause", v)} />
+                  ) : (
+                    <Toggle label="New paragraph at stanza" value={s.stanzaBreaks} onChange={(v) => set("stanzaBreaks", v)} />
+                  )}
+                </div>
+                <p className="note">
+                  A paragraph moves on when it is full{voice ? ", or at a pause once it has a few words" : ""}. The old one leaves with
+                  the exit effect below, at this quicker pace.
+                </p>
+              </>
+            )}
+            {(s.mode === "line" || s.mode === "page") && (
               <>
                 <Slider label="Unspoken words" value={s.ghost} min={0} max={0.45} step={0.01} onChange={(v) => set("ghost", v)} format={(v) => (v === 0 ? "hidden" : pct(v))} />
                 <Slider label="Spoken words" value={s.spokenLevel} min={0.1} max={1} step={0.01} onChange={(v) => set("spokenLevel", v)} format={pct} />
@@ -325,7 +370,9 @@ export default function Setup({ text, onText, settings, onSettings, onPlay }: Pr
 
           <button
             className="reset-link"
-            onClick={() => onSettings({ ...DEFAULT_SETTINGS, source: s.source, language: s.language, liveTranscript: s.liveTranscript })}
+            onClick={() =>
+              onSettings({ ...DEFAULT_SETTINGS, source: s.source, language: s.language, liveTranscript: s.liveTranscript, banned: s.banned })
+            }
           >
             Restore default staging
           </button>

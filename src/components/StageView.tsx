@@ -64,6 +64,7 @@ export default function StageView({ text, settings, onExit }: Props) {
     const listener = new VoiceListener({
       language: settings.language,
       context: text,
+      banned: settings.banned,
       ...(settings.liveTranscript
         ? {
             onSegment: (words: string[], done: boolean) => {

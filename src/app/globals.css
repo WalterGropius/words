@@ -381,7 +381,7 @@ kbd {
 
 .modes {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(2, 1fr);
   gap: 8px;
 }
 
@@ -853,6 +853,39 @@ kbd {
 
 .voice .note {
   margin: 0;
+}
+
+.voice__field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.voice__banned {
+  width: 100%;
+  resize: vertical;
+  background: transparent;
+  color: var(--fg);
+  border: 1px solid var(--hair);
+  padding: 8px 10px;
+  font: inherit;
+  font-size: 16px;
+  line-height: 1.4;
+}
+
+.voice__banned:focus {
+  outline: none;
+  border-color: var(--hair-strong);
+}
+
+.voice__link {
+  color: var(--dim);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.voice__link:hover {
+  color: var(--fg);
 }
 
 .mictest {

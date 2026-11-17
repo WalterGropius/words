@@ -86,10 +86,14 @@ interface LiveFrame {
   rows: number;
   lineHeight: number;
   maxW: number;
+  /** Top-left corner of the frame on stage. */
+  left: number;
   top: number;
   row: number;
   /** Pen position from the left edge of the frame. */
   x: number;
+  /** Words written into it. */
+  count: number;
   /** Stage time before which new words must wait (the previous page is still leaving). */
   hold: number;
 }
@@ -102,14 +106,46 @@ interface LiveWord {
   frame: LiveFrame;
   row: number;
   x: number;
+  count: number;
 }
 
 /** Settings that change where/how big words are; changing them restarts the show. */
 function layoutKey(s: Settings) {
-  return [s.mode, s.font, s.italic, s.caps, s.longS, s.size, s.linesAtOnce, s.maxPageLines, s.stanzaBreaks, s.align].join("|");
+  return [
+    s.mode,
+    s.font,
+    s.italic,
+    s.caps,
+    s.longS,
+    s.size,
+    s.linesAtOnce,
+    s.maxPageLines,
+    s.stanzaBreaks,
+    s.align,
+    s.paragraphLines,
+    s.paragraphWidth,
+  ].join("|");
 }
 
 const rand = (a: number, b: number) => a + Math.random() * (b - a);
+
+/** A paragraph needs this many words before a pause may close it (a lone "Ano." stays put). */
+const MIN_PARAGRAPH_WORDS = 4;
+
+/** A rectangle on stage, y up: spans [left, left + w] × [top - h, top]. */
+interface Box {
+  left: number;
+  top: number;
+  w: number;
+  h: number;
+}
+
+/** Overlap of a and b, with a grown by `gap` on every side. */
+function overlapArea(a: Box, b: Box, gap: number) {
+  const ox = Math.min(a.left + a.w + gap, b.left + b.w) - Math.max(a.left - gap, b.left);
+  const oy = Math.min(a.top + gap, b.top) - Math.max(a.top - a.h - gap, b.top - b.h);
+  return ox > 0 && oy > 0 ? ox * oy : 0;
+}
 
 export class Stage {
   private readonly canvas: HTMLCanvasElement;
@@ -143,8 +179,13 @@ export class Stage {
   private liveCount = 0;
   private liveFrame: LiveFrame | null = null;
   private lastLive: WordActor | null = null;
-  /** Words of the transcript segment still open to correction. */
+  /**
+   * Words that may still be taken back: the live transcript segment open to
+   * correction, or in a script's paragraph mode, the words written so far.
+   */
   private segment: LiveWord[] = [];
+  /** Where the latest paragraphs were put, so the next one goes elsewhere. */
+  private paragraphBoxes: Box[] = [];
 
   private width = 1;
   private height = 1;
@@ -207,7 +248,7 @@ export class Stage {
     this.live = false;
     this.parsed = parseText(text, { caps: settings.caps, longS: settings.longS });
     this.pages =
-      settings.mode === "word"
+      settings.mode === "word" || settings.mode === "paragraph"
         ? []
         : paginate(this.parsed, settings.mode === "line" ? settings.linesAtOnce : settings.maxPageLines, settings.stanzaBreaks);
     this.tokenPage = [];
@@ -273,13 +314,7 @@ export class Stage {
     while (keep < seg.length && seg[keep].frame !== this.liveFrame) keep++;
     if (keep === seg.length && keep >= words.length) return;
 
-    for (let i = seg.length - 1; i >= keep; i--) {
-      const w = seg[i];
-      w.actor.fadeTo(0, 0.25, true);
-      this.lit.delete(w.index);
-      w.frame.row = w.row;
-      w.frame.x = w.x;
-    }
+    for (let i = seg.length - 1; i >= keep; i--) this.unwrite(seg[i], 0.25);
     seg.length = keep;
     this.lastLive = seg.at(-1)?.actor ?? null;
     if (this.lastLive) this.lastLive.level = 1;
@@ -298,12 +333,26 @@ export class Stage {
     this.pause();
   }
 
-  /** The speaker paused: the next word starts a new line (live verse modes). */
+  /** The speaker paused: the next word starts a new line, or in paragraph mode a new paragraph. */
   pause() {
     const L = this.liveFrame;
-    if (!this.live || !L || L.x === 0) return;
+    if (!this.live || !L) return;
+    const s = this.settings;
+    if (s.mode === "paragraph" && s.paragraphOnPause && L.count >= MIN_PARAGRAPH_WORDS) this.closeParagraph();
+    else this.newRow();
+  }
+
+  private newRow() {
+    const L = this.liveFrame;
+    if (!L || L.x === 0) return;
     L.row++;
     L.x = 0;
+  }
+
+  /** The next word starts a new paragraph elsewhere, and this one leaves as it does. */
+  private closeParagraph() {
+    const L = this.liveFrame;
+    if (L && L.count > 0) L.row = L.rows;
   }
 
   /** Live settings; anything affecting layout restarts from black. */
@@ -326,6 +375,12 @@ export class Stage {
     if (this.settings.mode === "word") {
       this.current?.beginExit(this.exitOptions(), this.env());
       this.current = this.spawnWord(this.parsed.tokens[this.cursor].text, this.enterOptions());
+    } else if (this.settings.mode === "paragraph") {
+      const token = this.parsed.tokens[this.cursor];
+      const before = this.parsed.tokens[this.cursor - 1];
+      if (before && before.stanza !== token.stanza && this.settings.stanzaBreaks) this.closeParagraph();
+      else if (before && before.line !== token.line) this.newRow();
+      this.segment.push(this.writeLive(this.cursor, token.text));
     } else {
       const p = this.tokenPage[this.cursor];
       let delay = 0;
@@ -352,6 +407,16 @@ export class Stage {
       this.current?.fadeTo(0, 0.3, true);
       this.cursor = target;
       this.current = target >= 0 ? this.spawnWord(this.parsed.tokens[target].text, quick) : null;
+    } else if (this.settings.mode === "paragraph") {
+      // words of a paragraph that has already left can't be called back
+      const w = this.segment.at(-1);
+      if (this.cursor >= total || !w || w.frame !== this.liveFrame) return;
+      this.segment.pop();
+      this.unwrite(w, 0.3);
+      const back = this.segment.at(-1);
+      this.lastLive = back && back.frame === this.liveFrame ? back.actor : null;
+      if (this.lastLive) this.lastLive.level = 1;
+      this.cursor = target;
     } else if (this.cursor < total && target >= 0 && this.tokenPage[target] === this.pageIndex) {
       // un-speak the last word on this page
       this.lit.get(this.cursor)?.fadeTo(0, 0.3, true);
@@ -382,6 +447,7 @@ export class Stage {
     this.liveFrame = null;
     this.lastLive = null;
     this.segment = [];
+    this.paragraphBoxes = [];
     this.emit();
   }
 
@@ -436,9 +502,9 @@ export class Stage {
     return { effect: s.entrance, duration: s.entranceDuration, stagger: s.entranceStagger, delay };
   }
 
-  private exitOptions(delay = 0): ExitOptions {
+  private exitOptions(delay = 0, duration = this.settings.exitDuration): ExitOptions {
     const s = this.settings;
-    return { effect: s.exit, duration: s.exitDuration, stagger: s.exitStagger, delay };
+    return { effect: s.exit, duration, stagger: s.exitStagger, delay };
   }
 
   private spawnWord(text: string, enter: EnterOptions): WordActor {
@@ -603,9 +669,11 @@ export class Stage {
   }
 
   /**
-   * Live verse modes: words are written into a fixed frame, left to right,
-   * row by row, so nothing already on stage has to move. When the frame is
-   * full the page departs and writing starts again at the top.
+   * Live verse modes and paragraph mode: words are written into a fixed
+   * frame, left to right, row by row, so nothing already on stage has to
+   * move. When the frame is full the page departs and writing starts again
+   * at the top; in paragraph mode the old paragraph leaves quickly and the
+   * new one starts somewhere else.
    */
   private writeLive(index: number, text: string): LiveWord {
     const s = this.settings;
@@ -619,52 +687,121 @@ export class Stage {
       L.x = 0;
     }
     if (L.row >= L.rows) {
-      this.exitPage();
+      const paragraph = s.mode === "paragraph";
+      this.exitPage(paragraph ? s.paragraphFade : s.exitDuration);
       this.lastLive = null;
-      L = this.liveFrame = this.newLiveFrame(Math.min(1.4, 0.25 + s.exitDuration * 0.18));
+      // a new paragraph is elsewhere, so it needn't wait for the old one to clear
+      L = this.liveFrame = this.newLiveFrame(paragraph ? 0 : Math.min(1.4, 0.25 + s.exitDuration * 0.18));
       pen = { row: 0, x: 0 };
     }
     const left = L.x + (L.x > 0 ? sp : 0);
-    const x = -L.maxW / 2 + left;
+    const x = L.left + left;
     const y = L.top - (L.row + 0.5) * L.lineHeight * L.f - L.f * 0.3;
     L.x = left + tw;
+    const count = L.count++;
 
     if (this.lastLive) this.lastLive.level = toLinear(s.spokenLevel);
     const a = this.makeActor(text, L.f, new Vector3(x, y, 0), 1, this.pagePhase(index));
     a.beginEnter(this.enterOptions(Math.max(0, L.hold - this.time)), this.env());
     this.lit.set(index, a);
     this.lastLive = a;
-    return { text, index, actor: a, frame: L, ...pen };
+    return { text, index, actor: a, frame: L, ...pen, count };
+  }
+
+  /** Take a written word back off the stage and put the pen where it started. */
+  private unwrite(w: LiveWord, seconds: number) {
+    w.actor.fadeTo(0, seconds, true);
+    this.lit.delete(w.index);
+    w.frame.row = w.row;
+    w.frame.x = w.x;
+    w.frame.count = w.count;
   }
 
   private newLiveFrame(delay: number): LiveFrame {
     const s = this.settings;
     const h = this.height;
+    if (s.mode === "paragraph") return this.newParagraphFrame();
     // a live transcript in word mode still writes sentences: two big lines
     const rows = s.mode === "line" ? s.linesAtOnce : s.mode === "page" ? s.maxPageLines : 2;
     const lineHeight = 1.48;
     const f0 = h * (s.mode === "page" ? 0.06 : 0.085) * s.size;
     const f = Math.max(Math.min(f0, (h * 0.8) / (rows * lineHeight)), h * 0.022);
+    const maxW = this.width * 0.86;
     return {
       f,
       rows,
       lineHeight,
-      maxW: this.width * 0.86,
+      maxW,
+      left: -maxW / 2,
       top: (rows * lineHeight * f) / 2 + h * 0.015,
       row: 0,
       x: 0,
+      count: 0,
       hold: this.time + delay,
     };
   }
 
+  /** A paragraph-sized frame at a random spot, clear of the last paragraphs. */
+  private newParagraphFrame(): LiveFrame {
+    const s = this.settings;
+    const W = this.width;
+    const H = this.height;
+    const rows = s.paragraphLines;
+    const lineHeight = 1.48;
+    const mx = W * 0.05;
+    const my = H * 0.07;
+    const gap = Math.min(W, H) * 0.04;
+    const w = Math.min(W * s.paragraphWidth, W - 2 * mx);
+    let f = Math.max(H * 0.05 * s.size, H * 0.022);
+    f = Math.min(f, (H - 2 * my) / (rows * lineHeight));
+    // two paragraphs must always fit side by side or one above the other, so the
+    // new one never lands on the old: if they're too wide for that, set them smaller
+    if (w > (W - 2 * mx - gap) / 2) f = Math.min(f, (H - 2 * my - gap) / 2 / (rows * lineHeight));
+    const h = rows * lineHeight * f;
+
+    const xMin = -W / 2 + mx;
+    const xMax = Math.max(xMin, W / 2 - mx - w);
+    const yMax = H / 2 - my;
+    const yMin = Math.min(yMax, -H / 2 + my + h);
+    // above all stay clear of the paragraph that is leaving; the one before it only if there's room.
+    // When paragraphs are too big to avoid it, the least overlap puts the new one at the far side.
+    const boxes = this.paragraphBoxes;
+    const clash = (c: Box) => boxes.reduce((acc, b, i) => acc + overlapArea(c, b, gap) * (i === boxes.length - 1 ? 1000 : 1), 0);
+    let best: Box = { left: xMin, top: yMax, w, h };
+    let bestClash = Infinity;
+    for (let i = 0; i < 80 && bestClash > 0; i++) {
+      const c: Box = { left: rand(xMin, xMax), top: rand(yMin, yMax), w, h };
+      const k = clash(c);
+      if (k < bestClash) {
+        best = c;
+        bestClash = k;
+      }
+    }
+    // big paragraphs leave little free room for chance to find; a far corner always works
+    for (const left of [xMin, xMax]) {
+      for (const top of [yMin, yMax]) {
+        const c: Box = { left, top, w, h };
+        const k = clash(c);
+        if (k < bestClash) {
+          best = c;
+          bestClash = k;
+        }
+      }
+    }
+    this.paragraphBoxes = [...this.paragraphBoxes, best].slice(-2);
+    return { f, rows, lineHeight, maxW: w, left: best.left, top: best.top, row: 0, x: 0, count: 0, hold: this.time };
+  }
+
   /** Send the whole page off in a reading-order wave. */
-  private exitPage() {
+  private exitPage(duration = this.settings.exitDuration) {
     const s = this.settings;
     const spoken = [...this.lit.entries()].sort((a, b) => a[0] - b[0]).map((e) => e[1]);
-    const wave = Math.min(2.4, s.exitDuration * 0.45) * (0.2 + s.exitStagger);
+    const wave = Math.min(2.4, duration * 0.45) * (0.2 + s.exitStagger);
     const env = this.env();
     const drift = randomDrift();
-    spoken.forEach((a, k) => a.beginExit({ ...this.exitOptions(spoken.length > 1 ? (k / (spoken.length - 1)) * wave : 0), drift }, env));
+    spoken.forEach((a, k) =>
+      a.beginExit({ ...this.exitOptions(spoken.length > 1 ? (k / (spoken.length - 1)) * wave : 0, duration), drift }, env),
+    );
     this.ghosts.forEach((g) => g.fadeTo(0, 0.6, true));
     this.lit.clear();
     this.ghosts.clear();
@@ -674,6 +811,10 @@ export class Stage {
     if (this.settings.mode === "word") {
       this.current?.beginExit(this.exitOptions(), this.env());
       this.current = null;
+    } else if (this.settings.mode === "paragraph") {
+      this.exitPage(this.settings.paragraphFade);
+      this.liveFrame = null;
+      this.segment = [];
     } else {
       this.exitPage();
       this.pageIndex = -1;
@@ -695,6 +836,10 @@ export class Stage {
     this.slots.clear();
     this.current = null;
     this.particles.clear();
+    this.liveFrame = null;
+    this.lastLive = null;
+    this.segment = [];
+    this.paragraphBoxes = [];
   }
 
   /** Re-flow the current page instantly after a resize. */

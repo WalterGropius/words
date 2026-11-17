@@ -25,6 +25,8 @@ export interface VoiceOptions {
   language: string;
   /** Background text (e.g. the script) that biases recognition toward its vocabulary. */
   context?: string;
+  /** Comma-separated words never handed out (the caption still shows them). */
+  banned?: string;
   onWord?: (word: string) => void;
   /**
    * The current segment's words so far (final and provisional). Earlier
@@ -71,8 +73,27 @@ class FatalError extends Error {}
 
 const splitWords = (text: string) => text.split(/\s+/).filter(Boolean);
 
+/** Compare words loosely: case, punctuation and drawn-out letters don't matter ("Hmmm," → "hm"). */
+function wordKey(word: string): string {
+  return word
+    .toLocaleLowerCase()
+    .normalize("NFC")
+    .replace(/[^\p{L}\p{N}]/gu, "")
+    .replace(/(\p{L})\1+/gu, "$1");
+}
+
+/** A test for words that should never reach the stage: the banned list, and bare punctuation. */
+export function bannedFilter(list: string): (word: string) => boolean {
+  const keys = new Set(list.split(/[\s,;]+/).map(wordKey).filter(Boolean));
+  return (word) => {
+    const k = wordKey(word);
+    return k === "" || keys.has(k);
+  };
+}
+
 export class VoiceListener {
   private readonly opts: VoiceOptions;
+  private readonly isBanned: (word: string) => boolean;
   private stream: MediaStream | null = null;
   private ws: WebSocket | null = null;
   private recorder: MediaRecorder | null = null;
@@ -91,6 +112,7 @@ export class VoiceListener {
 
   constructor(opts: VoiceOptions) {
     this.opts = opts;
+    this.isBanned = bannedFilter(opts.banned ?? "");
   }
 
   async start() {
@@ -276,7 +298,7 @@ export class VoiceListener {
       // final text arrives in pieces ("Hel", "lo", " ", "world"): a word is done at whitespace
       const parts = (this.partial + t.text).split(/\s+/);
       this.partial = parts.pop() ?? "";
-      for (const w of parts) if (w) this.opts.onWord?.(w);
+      for (const w of parts) if (w && !this.isBanned(w)) this.opts.onWord?.(w);
     }
     this.opts.onCaption?.(this.settled, pending);
     this.updateHypothesis(this.segmentFinal + pending);
@@ -292,9 +314,9 @@ export class VoiceListener {
     const words = splitWords(text);
     if (words.length && !/\s$/.test(text)) {
       words.pop();
-      this.trailingTimer = setTimeout(() => this.opts.onSegment?.(splitWords(this.hypothesis), false), TRAILING_WORD_MS);
+      this.trailingTimer = setTimeout(() => this.opts.onSegment?.(this.shown(splitWords(this.hypothesis)), false), TRAILING_WORD_MS);
     }
-    this.opts.onSegment(words, false);
+    this.opts.onSegment(this.shown(words), false);
   }
 
   private endSegment() {
@@ -303,13 +325,17 @@ export class VoiceListener {
     const words = splitWords(this.segmentFinal);
     this.segmentFinal = "";
     this.hypothesis = "";
-    this.opts.onSegment?.(words, true);
+    this.opts.onSegment?.(this.shown(words), true);
+  }
+
+  private shown(words: string[]) {
+    return words.filter((w) => !this.isBanned(w));
   }
 
   private flushPartial() {
     const w = this.partial.trim();
     this.partial = "";
-    if (w) this.opts.onWord?.(w);
+    if (w && !this.isBanned(w)) this.opts.onWord?.(w);
   }
 
   private status(s: VoiceStatus, detail?: string) {
