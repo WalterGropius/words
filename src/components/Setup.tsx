@@ -329,14 +329,14 @@ export default function Setup({ text, onText, settings, onSettings, onPlay }: Pr
                   title={needsCzech && !f.czech ? "No Czech letters (ř, ě, ů…): they would show in a fallback face" : undefined}
                 >
                   <span className="font__sample" style={{ fontFamily: f.family }}>
-                    {f.id === "cinzel" ? "Thou Art" : "Thou art"}
+                    {f.id === "cinzel" || f.id === "cinzel-decorative" ? "Thou Art" : "Thou art"}
                   </span>
                   <span className="font__name">{f.label}</span>
                 </button>
               ))}
             </div>
             {needsCzech && !font.czech && (
-              <p className="note note--warn">{font.label} has no Czech letters (ř, ě, ů…). Choose Cormorant, EB Garamond, Cinzel or one of the sans serifs.</p>
+              <p className="note note--warn">{font.label} has no Czech letters (ř, ě, ů…). Choose Cormorant, EB Garamond, Cinzel, Cinzel Decorative or one of the sans serifs.</p>
             )}
             <Slider label="Size" value={s.size} min={0.4} max={2} step={0.05} onChange={(v) => set("size", v)} format={(v) => `${Math.round(v * 100)}%`} />
             <div className="row">

@@ -6,6 +6,8 @@ import {
   Cormorant_Garamond,
   EB_Garamond,
   Cinzel,
+  Cinzel_Decorative,
+  Tangerine,
   UnifrakturMaguntia,
   Inter,
   DM_Sans,
@@ -63,6 +65,19 @@ const cinzel = Cinzel({
   display: "block",
   preload: false,
 });
+const cinzelDeco = Cinzel_Decorative({
+  weight: "400",
+  subsets: ["latin", "latin-ext"],
+  display: "block",
+  preload: false,
+});
+// renaissance calligraphy; the bold cut, as the regular's hairlines vanish on a big screen
+const tangerine = Tangerine({
+  weight: "700",
+  subsets: ["latin"],
+  display: "block",
+  preload: false,
+});
 const fraktur = UnifrakturMaguntia({
   weight: "400",
   subsets: ["latin"],
@@ -100,6 +115,8 @@ export type FontId =
   | "cormorant"
   | "garamond"
   | "cinzel"
+  | "cinzel-decorative"
+  | "tangerine"
   | "fraktur"
   | "inter"
   | "dm-sans"
@@ -123,6 +140,8 @@ export const FONTS: FontDef[] = [
   { id: "cormorant", label: "Cormorant", note: "Elegant Garalde", family: cormorant.style.fontFamily, hasItalic: true, czech: true },
   { id: "garamond", label: "EB Garamond", note: "Renaissance classic", family: garamond.style.fontFamily, hasItalic: true, czech: true },
   { id: "cinzel", label: "Cinzel", note: "Roman capitals", family: cinzel.style.fontFamily, hasItalic: false, czech: true },
+  { id: "cinzel-decorative", label: "Cinzel Decorative", note: "Monumental theatre capitals", family: cinzelDeco.style.fontFamily, hasItalic: false, czech: true },
+  { id: "tangerine", label: "Tangerine", note: "Renaissance calligraphy", family: tangerine.style.fontFamily, hasItalic: false, czech: false },
   { id: "fraktur", label: "Unifraktur", note: "Blackletter", family: fraktur.style.fontFamily, hasItalic: false, czech: false },
   { id: "inter", label: "Inter", note: "Neutral modern sans", family: inter.style.fontFamily, hasItalic: true, czech: true },
   { id: "dm-sans", label: "DM Sans", note: "Soft geometric sans", family: dmSans.style.fontFamily, hasItalic: true, czech: true },
