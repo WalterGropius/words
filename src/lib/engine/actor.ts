@@ -242,13 +242,14 @@ export class WordActor {
     const dur = this.enter.duration;
     const startAt = env.time + (this.enter.delay ?? 0);
     const c = this.center;
-    const rx = g.width * 0.55 + f * 1.4;
-    const ry = f * (1.1 + turb * 0.8);
+    const { fogSize, fogStrength } = env.settings;
+    const rx = (g.width * 0.55 + f * 1.4) * fogSize;
+    const ry = f * (1.1 + turb * 0.8) * fogSize;
     // a point somewhere in the cloud, denser towards its heart
     const inCloud = () => {
       const th = Math.random() * Math.PI * 2;
       const r = Math.sqrt(Math.random());
-      return new Vector3(c.x + Math.cos(th) * rx * r, c.y + Math.sin(th) * ry * r, c.z - rand(0, 420));
+      return new Vector3(c.x + Math.cos(th) * rx * r, c.y + Math.sin(th) * ry * r, c.z - rand(0, 420) * fogSize);
     };
     this.letters.forEach((L, i) => {
       for (const p of sampleLetter(g, i, step)) {
@@ -264,12 +265,12 @@ export class WordActor {
           life: dur * rand(0.8, 1.05),
           size: step * scale * rand(0.9, 1.6),
           mode: 3,
-          alpha: 0.35,
+          alpha: 0.35 * fogStrength,
         });
       }
     });
     // the haze the word came out of, thinning away on the air
-    const puffs = Math.round(10 + this.letters.length * 7);
+    const puffs = Math.round((10 + this.letters.length * 7) * fogSize);
     for (let k = 0; k < puffs; k++) {
       const at = inCloud();
       env.particles.spawn({
@@ -281,9 +282,9 @@ export class WordActor {
         vz: rand(-10, 10),
         birth: startAt + rand(0, dur * 0.4),
         life: dur * rand(1.2, 2),
-        size: f * rand(0.9, 1.8),
+        size: f * rand(0.9, 1.8) * fogSize,
         mode: 2,
-        alpha: 0.08,
+        alpha: 0.08 * fogStrength,
       });
     }
   }
@@ -327,7 +328,8 @@ export class WordActor {
     const f = this.fontPx;
     const dur = this.exitOpts.duration;
     const delay = this.exitOpts.delay ?? 0;
-    const spread = 8 + 30 * turb;
+    const { fogSize, fogStrength } = env.settings;
+    const spread = (8 + 30 * turb) * fogSize;
     const brightness = this.levelNow * this.fade;
     this.letters.forEach((L, i) => {
       for (const p of sampleLetter(g, i, step)) {
@@ -341,9 +343,9 @@ export class WordActor {
           birth: env.time + delay + L.exitDelay + rand(0, dur * 0.3),
           life: dur * rand(0.7, 1.1) + 0.5,
           // big, faint, overlapping puffs: together they read as one wisp, not as dust
-          size: f * rand(0.35, 0.65),
+          size: f * rand(0.35, 0.65) * fogSize,
           mode: 2,
-          alpha: 0.14 * Math.max(0.35, brightness),
+          alpha: 0.14 * fogStrength * Math.max(0.35, brightness),
         });
       }
     });

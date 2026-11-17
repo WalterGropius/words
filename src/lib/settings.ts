@@ -46,6 +46,8 @@ export interface Settings {
   exitDuration: number; // s
   exitStagger: number; // 0..1
   gravity: number; // 0..1
+  fogSize: number; // nebula + smoke: 0.5..2.5 size of the cloud and its puffs
+  fogStrength: number; // nebula + smoke: 0.2..1.5 how visible the fog is
   turbulence: number; // 0..1
 
   // Atmosphere
@@ -96,6 +98,8 @@ export const DEFAULT_SETTINGS: Settings = {
   exitDuration: 3,
   exitStagger: 0.4,
   gravity: 0.3,
+  fogSize: 1,
+  fogStrength: 1,
   turbulence: 0.45,
 
   glow: 0.55,
@@ -133,6 +137,24 @@ export const LOOKS: Look[] = [
       paragraphFade: 3,
       spokenLevel: 0.6,
       entranceDuration: 1.4,
+      fogSize: 1,
+      fogStrength: 1,
+    },
+  },
+  {
+    id: "mist",
+    name: "Mist",
+    blurb: "The same nebula and smoke, a larger fog but fainter",
+    settings: {
+      mode: "paragraph",
+      entrance: "nebula",
+      exit: "smoke",
+      paragraphLinger: 1.75,
+      paragraphFade: 3,
+      spokenLevel: 0.6,
+      entranceDuration: 1.4,
+      fogSize: 1.8,
+      fogStrength: 0.55,
     },
   },
   {
