@@ -64,11 +64,21 @@ export default function StageView({ text, settings, onExit }: Props) {
     const listener = new VoiceListener({
       language: settings.language,
       context: text,
-      onWord: (w) => {
-        stageRef.current?.speak(w);
-        setHint(false);
-      },
-      onPause: () => stageRef.current?.pause(),
+      ...(settings.liveTranscript
+        ? {
+            onSegment: (words: string[], done: boolean) => {
+              stageRef.current?.transcribe(words);
+              if (done) stageRef.current?.endSegment();
+              if (words.length) setHint(false);
+            },
+          }
+        : {
+            onWord: (w: string) => {
+              stageRef.current?.speak(w);
+              setHint(false);
+            },
+            onPause: () => stageRef.current?.pause(),
+          }),
       onCaption: (settled, pending) => setCaption({ settled, pending }),
       onStatus: (status, detail) => setVoiceStatus({ status, detail }),
     });

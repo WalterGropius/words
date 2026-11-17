@@ -144,6 +144,12 @@ export default function Setup({ text, onText, settings, onSettings, onPlay }: Pr
                 <span className="voice__label">Language</span>
                 <Segmented value={s.language} options={LANGUAGES} onChange={(v) => set("language", v)} />
               </div>
+              <Toggle label="Live transcript" value={s.liveTranscript} onChange={(v) => set("liveTranscript", v)} />
+              <p className="note">
+                {s.liveTranscript
+                  ? "Words appear the moment they're heard and run on as sentences across the stage. If Soniox changes its mind about a word, it's quietly rewritten."
+                  : "Words appear only once Soniox is sure of them, often at the end of a sentence, and follow the Mode below."}
+              </p>
               <MicTest language={s.language} context={text} />
               <p className="note">
                 Words appear on stage as Soniox recognises them. The text below is sent along as a vocabulary hint, so names and
@@ -317,7 +323,10 @@ export default function Setup({ text, onText, settings, onSettings, onPlay }: Pr
             <Slider label="Film grain" value={s.grain} min={0} max={0.12} step={0.005} onChange={(v) => set("grain", v)} format={(v) => (v === 0 ? "none — pure black" : pct(v / 0.12))} />
           </Group>
 
-          <button className="reset-link" onClick={() => onSettings({ ...DEFAULT_SETTINGS, source: s.source, language: s.language })}>
+          <button
+            className="reset-link"
+            onClick={() => onSettings({ ...DEFAULT_SETTINGS, source: s.source, language: s.language, liveTranscript: s.liveTranscript })}
+          >
             Restore default staging
           </button>
         </section>

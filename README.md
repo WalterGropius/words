@@ -28,6 +28,8 @@ Instead of pressing a key for each word, the show can listen and put each word o
 
 The real key stays on the server. `/api/soniox-key` hands the browser a single-use key that expires in a minute. Whatever is in the text box goes to Soniox as a vocabulary hint. Voice needs an internet connection and Chrome, Edge or Firefox (Safari records audio in a format Soniox can't detect). For Czech, use Cormorant, EB Garamond, Cinzel, Inter, DM Sans or Space Grotesk: the Fell types and Unifraktur have no ř, ě or ů.
 
+**Live transcript** (on by default) puts each word on stage the moment Soniox hears it, written left to right as running sentences. Word mode uses two large lines, Line mode uses its line count, and Page mode a full page. If Soniox revises a word, only that word and those after it are rewritten. Turn it off to show only confirmed words. That is steadier, but Soniox often confirms only at the end of a sentence.
+
 In Line and Page mode, spoken words are written left to right into the frame. A pause in speech starts a new line, and a full frame departs like a page.
 
 ## The two steps

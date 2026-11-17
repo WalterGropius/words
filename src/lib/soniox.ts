@@ -2,8 +2,11 @@
  * Live speech-to-text from the microphone through Soniox's real-time API.
  *
  * The mic is recorded as WebM/Opus and streamed to Soniox over a WebSocket
- * ("auto" audio format). Finalized text is cut into whole words and handed
- * out one at a time; provisional text is only used for the operator caption.
+ * ("auto" audio format). Two views of the transcript are offered:
+ *  - onWord: finalized words one at a time (stable, but Soniox may only
+ *    finalize at the end of a sentence);
+ *  - onSegment: the current sentence as heard so far, provisional words
+ *    included, so it can be shown live and corrected as Soniox revises it.
  * If the connection drops mid-show it reconnects on its own with a fresh key.
  */
 
@@ -12,6 +15,8 @@ const MODEL = "stt-rt-v6";
 /** Soniox allows ~8,000 tokens of context; stay well under it. */
 const MAX_CONTEXT_CHARS = 6000;
 const CAPTION_CHARS = 220;
+/** A word still being spoken is shown once the next one starts, or after this much quiet. */
+const TRAILING_WORD_MS = 600;
 
 export type VoiceStatus = "connecting" | "listening" | "muted" | "error" | "stopped";
 
@@ -21,6 +26,11 @@ export interface VoiceOptions {
   /** Background text (e.g. the script) that biases recognition toward its vocabulary. */
   context?: string;
   onWord?: (word: string) => void;
+  /**
+   * The current segment's words so far (final and provisional). Earlier
+   * entries can change between calls; `done` means the segment is final.
+   */
+  onSegment?: (words: string[], done: boolean) => void;
   /** The speaker paused: Soniox closed a segment. */
   onPause?: () => void;
   /** Recent transcript for the operator: settled text plus the still-changing tail. */
@@ -59,6 +69,8 @@ async function fetchKey(): Promise<string> {
 
 class FatalError extends Error {}
 
+const splitWords = (text: string) => text.split(/\s+/).filter(Boolean);
+
 export class VoiceListener {
   private readonly opts: VoiceOptions;
   private stream: MediaStream | null = null;
@@ -72,6 +84,10 @@ export class VoiceListener {
 
   private partial = "";
   private settled = "";
+  /** Final text of the current segment (since the last endpoint). */
+  private segmentFinal = "";
+  private hypothesis = "";
+  private trailingTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(opts: VoiceOptions) {
     this.opts = opts;
@@ -112,7 +128,7 @@ export class VoiceListener {
     if (this.muted === muted || this.stopped) return;
     this.muted = muted;
     if (muted) {
-      this.flushPartial();
+      // the finalize below closes the segment with a <fin>
       if (this.recorder?.state === "recording") this.recorder.pause();
       this.send(JSON.stringify({ type: "finalize" }));
     } else if (this.recorder?.state === "paused") {
@@ -233,6 +249,7 @@ export class VoiceListener {
       ws.close();
     }
     this.flushPartial();
+    this.endSegment();
   }
 
   private send(data: string) {
@@ -250,16 +267,43 @@ export class VoiceListener {
       }
       if (t.text === "<end>" || t.text === "<fin>") {
         this.flushPartial();
+        this.endSegment();
         this.opts.onPause?.();
         continue;
       }
       this.settled = (this.settled + t.text).slice(-CAPTION_CHARS);
+      this.segmentFinal += t.text;
       // final text arrives in pieces ("Hel", "lo", " ", "world"): a word is done at whitespace
       const parts = (this.partial + t.text).split(/\s+/);
       this.partial = parts.pop() ?? "";
       for (const w of parts) if (w) this.opts.onWord?.(w);
     }
     this.opts.onCaption?.(this.settled, pending);
+    this.updateHypothesis(this.segmentFinal + pending);
+  }
+
+  private updateHypothesis(text: string) {
+    if (text === this.hypothesis) return;
+    this.hypothesis = text;
+    if (this.trailingTimer) clearTimeout(this.trailingTimer);
+    this.trailingTimer = null;
+    if (!this.opts.onSegment) return;
+    // hold back a word that may still be growing ("otáz" → "otázka") until it's clearly over
+    const words = splitWords(text);
+    if (words.length && !/\s$/.test(text)) {
+      words.pop();
+      this.trailingTimer = setTimeout(() => this.opts.onSegment?.(splitWords(this.hypothesis), false), TRAILING_WORD_MS);
+    }
+    this.opts.onSegment(words, false);
+  }
+
+  private endSegment() {
+    if (this.trailingTimer) clearTimeout(this.trailingTimer);
+    this.trailingTimer = null;
+    const words = splitWords(this.segmentFinal);
+    this.segmentFinal = "";
+    this.hypothesis = "";
+    this.opts.onSegment?.(words, true);
   }
 
   private flushPartial() {

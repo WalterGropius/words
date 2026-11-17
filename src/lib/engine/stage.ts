@@ -94,6 +94,16 @@ interface LiveFrame {
   hold: number;
 }
 
+/** A word written into a live frame, with the pen position it was written from. */
+interface LiveWord {
+  text: string;
+  index: number;
+  actor: WordActor;
+  frame: LiveFrame;
+  row: number;
+  x: number;
+}
+
 /** Settings that change where/how big words are; changing them restarts the show. */
 function layoutKey(s: Settings) {
   return [s.mode, s.font, s.italic, s.caps, s.longS, s.size, s.linesAtOnce, s.maxPageLines, s.stanzaBreaks, s.align].join("|");
@@ -132,6 +142,9 @@ export class Stage {
   private live = false;
   private liveCount = 0;
   private liveFrame: LiveFrame | null = null;
+  private lastLive: WordActor | null = null;
+  /** Words of the transcript segment still open to correction. */
+  private segment: LiveWord[] = [];
 
   private width = 1;
   private height = 1;
@@ -223,6 +236,8 @@ export class Stage {
     this.pageIndex = -1;
     this.liveCount = 0;
     this.liveFrame = null;
+    this.lastLive = null;
+    this.segment = [];
     this.ready = true;
     this.emit();
   }
@@ -241,6 +256,46 @@ export class Stage {
       this.writeLive(index, text);
     }
     this.emit();
+  }
+
+  /**
+   * Live transcript: show the current segment as heard so far. Words that
+   * Soniox has revised since the last call are taken back and rewritten in
+   * place; words already on a page that has left the stage stay as they were.
+   */
+  transcribe(rawWords: string[]) {
+    if (!this.ready || !this.live) return;
+    const s = this.settings;
+    const words = rawWords.map((w) => styleWord(w, { caps: s.caps, longS: s.longS }));
+    const seg = this.segment;
+    let keep = 0;
+    while (keep < seg.length && keep < words.length && seg[keep].text === words[keep]) keep++;
+    while (keep < seg.length && seg[keep].frame !== this.liveFrame) keep++;
+    if (keep === seg.length && keep >= words.length) return;
+
+    for (let i = seg.length - 1; i >= keep; i--) {
+      const w = seg[i];
+      w.actor.fadeTo(0, 0.25, true);
+      this.lit.delete(w.index);
+      w.frame.row = w.row;
+      w.frame.x = w.x;
+    }
+    seg.length = keep;
+    this.lastLive = seg.at(-1)?.actor ?? null;
+    if (this.lastLive) this.lastLive.level = 1;
+
+    for (let i = keep; i < words.length; i++) {
+      const index = this.liveCount++;
+      seg.push(this.writeLive(index, words[i]));
+    }
+    this.cursor = this.liveCount - 1;
+    this.emit();
+  }
+
+  /** Live transcript: the segment is final; the next one starts on a new line. */
+  endSegment() {
+    this.segment = [];
+    this.pause();
   }
 
   /** The speaker paused: the next word starts a new line (live verse modes). */
@@ -325,6 +380,8 @@ export class Stage {
     this.pageIndex = -1;
     this.liveCount = 0;
     this.liveFrame = null;
+    this.lastLive = null;
+    this.segment = [];
     this.emit();
   }
 
@@ -550,38 +607,43 @@ export class Stage {
    * row by row, so nothing already on stage has to move. When the frame is
    * full the page departs and writing starts again at the top.
    */
-  private writeLive(index: number, text: string) {
+  private writeLive(index: number, text: string): LiveWord {
     const s = this.settings;
     let L = this.liveFrame;
     if (!L) L = this.liveFrame = this.newLiveFrame(0);
     const sp = measureText(" ", this.font, L.f) * 1.05;
     const tw = measureText(text, this.font, L.f);
+    let pen = { row: L.row, x: L.x };
     if (L.x > 0 && L.x + sp + tw > L.maxW) {
       L.row++;
       L.x = 0;
     }
     if (L.row >= L.rows) {
       this.exitPage();
+      this.lastLive = null;
       L = this.liveFrame = this.newLiveFrame(Math.min(1.4, 0.25 + s.exitDuration * 0.18));
+      pen = { row: 0, x: 0 };
     }
     const left = L.x + (L.x > 0 ? sp : 0);
     const x = -L.maxW / 2 + left;
     const y = L.top - (L.row + 0.5) * L.lineHeight * L.f - L.f * 0.3;
     L.x = left + tw;
 
-    const prev = this.lit.get(index - 1);
-    if (prev) prev.level = toLinear(s.spokenLevel);
+    if (this.lastLive) this.lastLive.level = toLinear(s.spokenLevel);
     const a = this.makeActor(text, L.f, new Vector3(x, y, 0), 1, this.pagePhase(index));
     a.beginEnter(this.enterOptions(Math.max(0, L.hold - this.time)), this.env());
     this.lit.set(index, a);
+    this.lastLive = a;
+    return { text, index, actor: a, frame: L, ...pen };
   }
 
   private newLiveFrame(delay: number): LiveFrame {
     const s = this.settings;
     const h = this.height;
-    const rows = s.mode === "line" ? s.linesAtOnce : s.maxPageLines;
+    // a live transcript in word mode still writes sentences: two big lines
+    const rows = s.mode === "line" ? s.linesAtOnce : s.mode === "page" ? s.maxPageLines : 2;
     const lineHeight = 1.48;
-    const f0 = h * (s.mode === "line" ? 0.085 : 0.06) * s.size;
+    const f0 = h * (s.mode === "page" ? 0.06 : 0.085) * s.size;
     const f = Math.max(Math.min(f0, (h * 0.8) / (rows * lineHeight)), h * 0.022);
     return {
       f,

@@ -10,6 +10,7 @@ export interface Settings {
   // Source
   source: Source; // script = pressed word by word, voice = live from the mic via Soniox
   language: string; // voice: ISO language hint, "" = detect
+  liveTranscript: boolean; // voice: show words the moment they're heard, as flowing sentences
 
   // Staging
   mode: Mode;
@@ -52,6 +53,7 @@ export interface Settings {
 export const DEFAULT_SETTINGS: Settings = {
   source: "script",
   language: "cs",
+  liveTranscript: true,
 
   mode: "word",
   linesAtOnce: 1,
