@@ -452,7 +452,8 @@ export default function Setup({ text, onText, settings, onSettings, onPlay }: Pr
                 <Slider label="Noise layers" value={s.smokeLayers} min={1} max={4} step={1} onChange={(v) => set("smokeLayers", v)} format={(v) => `${v}`} />
                 <Slider label="Noise intensity" value={s.smokeNoise} min={0} max={1} step={0.05} onChange={(v) => set("smokeNoise", v)} format={pct} />
                 <Slider label="Noise contrast" value={s.smokeContrast} min={0.5} max={3} step={0.05} onChange={(v) => set("smokeContrast", v)} format={(v) => `${v.toFixed(2)}×`} />
-                <p className="note">Each puff is a soft radial gradient multiplied through a smoke texture at a random, slowly turning angle. More layers add finer wisps (one texture lookup each) — 2 is plenty on most displays.</p>
+                <Slider label="Fade small puffs" value={s.smokeSpeckFade} min={0} max={2} step={0.05} onChange={(v) => set("smokeSpeckFade", v)} format={(v) => (v === 0 ? "off" : pct(v))} />
+                <p className="note">Each puff is a soft radial gradient multiplied through a smoke texture at a random, slowly turning angle. More layers add finer wisps (one texture lookup each) — 2 is plenty on most displays. Small puffs fade out so they don't show as specks; raise the fade if you still see them.</p>
               </Group>
               </>
             )}

@@ -941,6 +941,8 @@ export class Stage {
     pu.uLayers.value = s.smokeLayers;
     pu.uNoiseAmt.value = s.smokeNoise;
     pu.uContrast.value = s.smokeContrast;
+    // relative to the stage height, so a big display fades the same puffs a laptop does
+    pu.uSpeckPx.value = s.smokeSpeckFade * this.height * this.pixelRatio * 0.06;
     this.particles.flush();
 
     const du = this.dust.material.uniforms;

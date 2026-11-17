@@ -96,6 +96,7 @@ const vertexShader = /* glsl */ `
   uniform float uScale;
   uniform float uGravity;
   uniform float uTurb;
+  uniform float uSpeckPx; // smoke/nebula puffs smaller than this (device px) fade out; 0 = off
   attribute vec3 aStart;
   attribute vec3 aVec;
   attribute vec4 aParams; // birth, life, seed, mode
@@ -136,7 +137,7 @@ const vertexShader = /* glsl */ `
       float e = 1.0 - pow(1.0 - u, 3.0);
       vec3 swirl = vec3(sin(seed * 40.0 + age * 1.2), cos(seed * 33.0 + age), sin(seed * 21.0 + age * 0.8)) * (1.0 - e);
       p = mix(aStart, aVec, e) + swirl * (30.0 + uTurb * 80.0);
-      a = smoothstep(0.0, 0.3, u) * (1.0 - smoothstep(0.7, 1.0, u)) * 0.5;
+      a = smoothstep(0.0, 0.35, u) * (1.0 - smoothstep(0.55, 1.0, u)) * 0.5;
       vHeat = 0.0;
       vSoft = 1.0;
       grow = mix(10.0, 1.0, e);
@@ -147,7 +148,7 @@ const vertexShader = /* glsl */ `
         cos(age * 0.6 + seed * 23.0) + 0.5 * sin(age * 1.6 + seed * 13.0),
         sin(age * 0.5 + seed * 11.0));
       p = aStart + aVec * age + vec3(0.0, 4.0 * age * age, 0.0) + curl * (8.0 + uTurb * 30.0) * age;
-      a = smoothstep(0.0, 0.12, u) * pow(1.0 - u, 1.6) * 0.45;
+      a = smoothstep(0.0, 0.2, u) * pow(1.0 - u, 2.0) * 0.45;
       vHeat = 0.0;
       vSoft = 1.0;
       grow = 1.0 + 5.0 * u;
@@ -169,6 +170,9 @@ const vertexShader = /* glsl */ `
     vec4 mv = modelViewMatrix * vec4(p, 1.0);
     gl_Position = projectionMatrix * mv;
     float size = aSize * grow * uScale / max(1.0, -mv.z);
+    // a soft puff only reads as smoke when it's big: small ones fade away rather
+    // than show as bright specks (condensing nebula, distant or young smoke)
+    if (vSoft > 0.5 && uSpeckPx > 0.5) { float k = smoothstep(uSpeckPx * 0.3, uSpeckPx, size); a *= k * k; }
     if (size < 1.5) { a *= size / 1.5; size = 1.5; }
     gl_PointSize = size;
     vAlpha = a * aAlpha;
@@ -286,6 +290,7 @@ export class ParticleSystem {
         uScale: { value: 1000 },
         uGravity: { value: 0 },
         uTurb: { value: 0.5 },
+        uSpeckPx: { value: 0 },
         uIntensity: { value: 1 },
         uNoise: { value: this.noise },
         uLayers: { value: 2 },
