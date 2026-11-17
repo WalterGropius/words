@@ -4,7 +4,7 @@ import { CanvasTexture, LinearFilter, LinearMipmapLinearFilter } from "three";
 const ASCENT = 1.25;
 const DESCENT = 0.6;
 const PAD = 0.3; // horizontal padding per side, in em (italic overhang, blur room)
-const GAP = 4; // px between atlas cells so mipmaps don't bleed
+const GAP = 16; // px between atlas cells so blurred taps' mipmaps (to level 3) don't bleed
 const MAX_ROW = 2048;
 const MAX_TEX = 4096;
 

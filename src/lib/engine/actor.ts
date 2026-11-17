@@ -16,6 +16,9 @@ const easeOutQuart = (t: number) => 1 - Math.pow(1 - t, 4);
 const easeInOutSine = (t: number) => -(Math.cos(Math.PI * t) - 1) / 2;
 const rand = (a: number, b: number) => a + Math.random() * (b - a);
 
+/** Samples per em for nebula and smoke, whatever the mode (the paragraph look they were tuned on). */
+const FOG_DENSITY = 16;
+
 export const randomDrift = () => new Vector3(rand(-30, 30), rand(12, 40), -rand(170, 280));
 
 /**
@@ -39,6 +42,38 @@ export interface ActorEnv {
   density: number;
   /** Word-level sway amount (big in word mode, tiny on a page). */
   sway: number;
+  /** Fog already hanging on the stage, so clouds piling up in one place stay smoke instead of burning white. */
+  haze: Haze;
+}
+
+/** Recent fog clouds: where, how wide, when. */
+export class Haze {
+  private clouds: { x: number; y: number; r: number; t: number; life: number }[] = [];
+
+  /** How much fog is already around (x, y) at `time`: 0 = clear air, ~1 per overlapping fresh cloud. */
+  loadAt(x: number, y: number, r: number, time: number) {
+    let load = 0;
+    for (const c of this.clouds) {
+      const age = (time - c.t) / c.life;
+      if (age >= 1 || age < -0.5) continue;
+      const d = Math.hypot(x - c.x, y - c.y) / (c.r + r);
+      if (d >= 1) continue;
+      load += (1 - d) * (1 - Math.max(0, age));
+    }
+    return load;
+  }
+
+  /** Add a cloud and return how much to dim it by. */
+  add(x: number, y: number, r: number, time: number, life: number) {
+    const load = this.loadAt(x, y, r, time);
+    this.clouds = this.clouds.filter((c) => time - c.t < c.life);
+    this.clouds.push({ x, y, r, t: time, life });
+    return 1 / (1 + 0.8 * load);
+  }
+
+  clear() {
+    this.clouds = [];
+  }
 }
 
 interface Letter {
@@ -235,7 +270,9 @@ export class WordActor {
    */
   private emitNebula(env: ActorEnv) {
     const g = this.glyphs;
-    const step = g.emPx / (env.density * 0.75);
+    // fog is sampled at a fixed density: in word mode the letters are sampled ~2x finer,
+    // which would pile ~4x the puffs on each other and burn the cloud white
+    const step = g.emPx / (Math.min(env.density, FOG_DENSITY) * 0.75);
     const scale = 1 / g.k;
     const f = this.fontPx;
     const turb = env.settings.turbulence;
@@ -245,6 +282,7 @@ export class WordActor {
     const { fogSize, fogStrength } = env.settings;
     const rx = (g.width * 0.55 + f * 1.4) * fogSize;
     const ry = f * (1.1 + turb * 0.8) * fogSize;
+    const dim = env.haze.add(c.x, c.y, rx, startAt, dur * 1.6);
     // a point somewhere in the cloud, denser towards its heart
     const inCloud = () => {
       const th = Math.random() * Math.PI * 2;
@@ -265,7 +303,7 @@ export class WordActor {
           life: dur * rand(0.8, 1.05),
           size: step * scale * rand(0.9, 1.6),
           mode: 3,
-          alpha: 0.35 * fogStrength,
+          alpha: 0.35 * fogStrength * dim,
         });
       }
     });
@@ -284,7 +322,7 @@ export class WordActor {
         life: dur * rand(1.2, 2),
         size: f * rand(0.9, 1.8) * fogSize,
         mode: 2,
-        alpha: 0.08 * fogStrength,
+        alpha: 0.08 * fogStrength * dim,
       });
     }
   }
@@ -323,7 +361,7 @@ export class WordActor {
   private emitSmoke(env: ActorEnv) {
     const g = this.glyphs;
     const turb = env.settings.turbulence;
-    const step = g.emPx / (env.density * 0.6);
+    const step = g.emPx / (Math.min(env.density, FOG_DENSITY) * 0.6);
     const scale = 1 / g.k;
     const f = this.fontPx;
     const dur = this.exitOpts.duration;
@@ -331,6 +369,8 @@ export class WordActor {
     const { fogSize, fogStrength } = env.settings;
     const spread = (8 + 30 * turb) * fogSize;
     const brightness = this.levelNow * this.fade;
+    const c = this.center;
+    const dim = env.haze.add(c.x, c.y, g.width * 0.5 + f, env.time + delay, dur + 0.5);
     this.letters.forEach((L, i) => {
       for (const p of sampleLetter(g, i, step)) {
         env.particles.spawn({
@@ -345,7 +385,7 @@ export class WordActor {
           // big, faint, overlapping puffs: together they read as one wisp, not as dust
           size: f * rand(0.35, 0.65) * fogSize,
           mode: 2,
-          alpha: 0.14 * fogStrength * Math.max(0.35, brightness),
+          alpha: 0.14 * fogStrength * Math.max(0.35, brightness) * dim,
         });
       }
     });
@@ -690,7 +730,14 @@ export class WordActor {
       m.visible = a > 0.001;
       const blurPx = Math.min(L.blur, 0.32) * blurBase;
       u.uBlur.value.set(blurPx / W, blurPx / H);
-      u.uLod.value = blurPx > 3 ? Math.min(4, Math.log2(blurPx * 0.4)) : 0;
+      u.uTexSize.value.set(W, H);
+      // more taps for wider blurs; mips only soften the gaps between taps, so stay
+      // shallow (deep mips are blocky and bleed across atlas cells)
+      const taps = blurPx < 1 ? 0 : Math.min(32, Math.max(8, Math.round(blurPx * 0.75)));
+      u.uTaps.value = Math.max(1, taps);
+      if (taps === 0) u.uBlur.value.set(0, 0);
+      // soften each tap to about the spacing between taps, so they blend instead of echoing
+      u.uLod.value = taps ? Math.max(0, Math.log2(blurPx * Math.sqrt(3.14 / taps))) : 0;
       u.uWipe.value = this.wipe;
       u.uDissolve.value = this.dissolve;
     }

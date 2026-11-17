@@ -14,6 +14,7 @@ const fragmentShader = /* glsl */ `
   uniform vec2 uSpan;       // portion of the word span covered by this quad
   uniform vec2 uBlur;       // blur radius in texture uv
   uniform float uLod;       // mip bias so each blur tap is itself soft
+  uniform float uTaps;      // blur taps, 8..32 by radius
   uniform float uOpacity;
   uniform float uIntensity;
   uniform float uDissolve;  // 0 intact .. 1 gone
@@ -29,22 +30,38 @@ const fragmentShader = /* glsl */ `
                mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), f.x), f.y);
   }
 
+  uniform vec2 uTexSize;    // atlas size in px
+
+  // An explicit, capped mip level: a tilted quad (arrive, scatter) already asks
+  // for coarse mips, and adding the blur bias on top used to reach levels where
+  // the whole atlas averages to grey, filling the letter's quad with a box.
+  float gLod;
   float tap(vec2 uv) {
-    return texture2D(uMap, clamp(uv, uRect.xy, uRect.zw), uLod).a;
+    // outside the letter's cell is empty paper, not a smear of its edge
+    vec2 inside = step(uRect.xy, uv) * step(uv, uRect.zw);
+    return textureLod(uMap, uv, gLod).a * inside.x * inside.y;
   }
 
   void main() {
     vec2 uv = vec2(mix(uRect.x, uRect.z, vUv.x), mix(uRect.w, uRect.y, vUv.y));
+    vec2 px = uv * uTexSize;
+    float footprint = max(length(dFdx(px)), length(dFdy(px)));
+    gLod = clamp(max(log2(max(footprint, 1e-4)), uLod), 0.0, 3.2);
     float a;
     if (uBlur.x > 0.00002) {
-      a = tap(uv) * 0.16;
-      for (int i = 0; i < 6; i++) {
-        float ang = float(i) * 1.0471976;
-        vec2 d = vec2(cos(ang), sin(ang));
-        vec2 d2 = vec2(cos(ang + 0.5235988), sin(ang + 0.5235988));
-        a += tap(uv + d * uBlur * 0.45) * 0.07;
-        a += tap(uv + d2 * uBlur) * 0.07;
+      // a Gaussian-weighted Vogel (golden-angle) disc: irregular, so the taps
+      // don't line up into ghost copies of the letter; soft mips fill the gaps
+      float rot = uSeed * 6.2831853; // one turn per letter: no per-pixel noise or stripes
+      float sum = 0.0, wsum = 0.0;
+      for (int i = 0; i < 32; i++) {
+        if (float(i) >= uTaps) break;
+        float r = sqrt((float(i) + 0.5) / uTaps);
+        float th = float(i) * 2.3999632 + rot;
+        float w = exp(-2.2 * r * r);
+        sum += tap(uv + vec2(cos(th), sin(th)) * r * uBlur) * w;
+        wsum += w;
       }
+      a = sum / wsum;
     } else {
       a = tap(uv);
     }
@@ -80,6 +97,8 @@ export type LetterMaterial = ShaderMaterial & {
     uSpan: { value: Vector2 };
     uBlur: { value: Vector2 };
     uLod: { value: number };
+    uTaps: { value: number };
+    uTexSize: { value: Vector2 };
     uOpacity: { value: number };
     uIntensity: { value: number };
     uDissolve: { value: number };
@@ -98,6 +117,8 @@ export function createLetterMaterial(map: Texture, rect: [number, number, number
       uSpan: { value: new Vector2(...span) },
       uBlur: { value: new Vector2(0, 0) },
       uLod: { value: 0 },
+      uTaps: { value: 8 },
+      uTexSize: { value: new Vector2(1, 1) },
       uOpacity: { value: 0 },
       uIntensity: { value: 1 },
       uDissolve: { value: 0 },

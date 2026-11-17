@@ -14,7 +14,7 @@ import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
 import { ShaderPass } from "three/examples/jsm/postprocessing/ShaderPass.js";
 import { ensureFontLoaded, getFont } from "../fonts";
 import type { Settings } from "../settings";
-import { WordActor, randomDrift, toLinear, type ActorEnv, type EnterOptions, type ExitOptions } from "./actor";
+import { Haze, WordActor, randomDrift, toLinear, type ActorEnv, type EnterOptions, type ExitOptions } from "./actor";
 import { Dust } from "./dust";
 import { measureText, rasterizeWord, type FontSpec, type WordGlyphs } from "./glyphs";
 import { ParticleSystem } from "./particles";
@@ -157,6 +157,7 @@ export class Stage {
   private readonly finalPass: ShaderPass;
   private readonly particles: ParticleSystem;
   private readonly dust: Dust;
+  private readonly haze = new Haze();
   private readonly words = new Group();
   private readonly actors = new Set<WordActor>();
   private readonly glyphCache = new Map<string, { g: WordGlyphs; refs: number }>();
@@ -496,6 +497,7 @@ export class Stage {
       particles: this.particles,
       density,
       sway: mode === "word" ? 1 : 0.12,
+      haze: this.haze,
     };
   }
 
@@ -845,6 +847,7 @@ export class Stage {
     this.slots.clear();
     this.current = null;
     this.particles.clear();
+    this.haze.clear();
     this.liveFrame = null;
     this.lastLive = null;
     this.segment = [];

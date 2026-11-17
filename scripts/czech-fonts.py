@@ -10,13 +10,14 @@ Google Fonts only serves the IM Fell faces and Meddon with a "latin" subset, whi
 UnifrakturMaguntia really do lack the caron and ring letters (they have š ž
 but not č ř ě ň ť ď ů). So:
 
-  * Fell (all four, roman + italic) and Meddon: the complete, unmodified font, re-encoded
+  * Fell (all four, roman + italic): the complete, unmodified font, re-encoded
     as WOFF2 for the web.
   * Tangerine Bold, UnifrakturMaguntia: the missing letters are composed from
     the font's own base letters and its own caron / ring / apostrophe, placed
     the way the font itself places the caron on š/Š and the ring on å/Å.
-    Being modified, they are renamed (SIL OFL Reserved Font Names) to
-    "Words Script" and "Words Fraktur".
+  * Meddon: complete, but its ď is twice as wide as a d, so it is narrowed.
+  Being modified, these three are renamed (SIL OFL Reserved Font Names) to
+  "Words Script", "Words Fraktur" and "Words Hand".
 
 The output is committed; rerun this only to rebuild it.
 """
@@ -43,7 +44,7 @@ FONTS = [
     ("fell-dw-pica", "IM Fell DW Pica", "ital@0;1", None),
     ("fell-french-canon", "IM Fell French Canon", "ital@0;1", None),
     ("fell-double-pica", "IM Fell Double Pica", "ital@0;1", None),
-    ("meddon", "Meddon", None, None),
+    ("meddon", "Meddon", None, "Words Hand"),
     ("tangerine", "Tangerine", "wght@700", "Words Script"),
     ("unifraktur", "UnifrakturMaguntia", None, "Words Fraktur"),
 ]
@@ -196,6 +197,23 @@ def compose_czech(font: TTFont):
     return [ch for ch, _ in added]
 
 
+def fix_spacing(font: TTFont):
+    """Some fonts ship a ď/ť far wider than its letter (Meddon's ď is twice a d): trim it to its ink."""
+    cmap, gs, hmtx = font.getBestCmap(), font.getGlyphSet(), font["hmtx"]
+    upm = font["head"].unitsPerEm
+    fixed = []
+    for ch, base in (("ď", "d"), ("ť", "t"), ("Ď", "D"), ("Ť", "T")):
+        if ord(ch) not in cmap:
+            continue
+        name, bname = cmap[ord(ch)], cmap[ord(base)]
+        adv, lsb = hmtx[name]
+        badv = hmtx[bname][0]
+        if adv > badv * 1.3:
+            hmtx[name] = (max(badv, round(bounds(gs, name)[2] + 0.02 * upm)), lsb)
+            fixed.append(ch)
+    return fixed
+
+
 def rename(font: TTFont, family: str, style: str):
     ps = family.replace(" ", "") + "-" + style.replace(" ", "")
     for rec in list(font["name"].names):
@@ -216,7 +234,7 @@ def main():
             font = TTFont(io.BytesIO(data), recalcTimestamp=False)
             added = []
             if new_name:
-                added = compose_czech(font)
+                added = compose_czech(font) + fix_spacing(font)
                 rename(font, new_name, "Italic" if style == "italic" else "Regular")
             missing = [c for c in CZECH if ord(c) not in font.getBestCmap()]
             if missing:
@@ -224,7 +242,7 @@ def main():
             font.flavor = "woff2"
             path = OUT / f"{slug}-{style}.woff2"
             font.save(path)
-            note = f"composed {''.join(added)}" if added else "complete as is"
+            note = f"composed/fixed {''.join(added)}" if added else "complete as is"
             print(f"{path.relative_to(OUT.parent.parent)}  {path.stat().st_size // 1024} KB  {note}")
 
 
