@@ -16,6 +16,7 @@ import {
 import { VoiceListener, type VoiceStatus } from "@/lib/soniox";
 import { TEXTS } from "@/lib/texts";
 import Preview from "./Preview";
+import Setups from "./Setups";
 
 interface Props {
   text: string;
@@ -85,6 +86,15 @@ const EXIT_NOTES: Record<Exit, string> = {
   fade: "Simply fades.",
 };
 
+type Tab = "mode" | "type" | "motion" | "fog" | "air";
+const TABS: { id: Tab; label: string }[] = [
+  { id: "mode", label: "Mode" },
+  { id: "type", label: "Typeface" },
+  { id: "motion", label: "Entrance & Exit" },
+  { id: "fog", label: "Fog" },
+  { id: "air", label: "Atmosphere" },
+];
+
 export default function Setup({ text, onText, settings, onSettings, onPlay }: Props) {
   const set = <K extends keyof Settings>(key: K, value: Settings[K]) => onSettings({ ...settings, [key]: value });
   const s = settings;
@@ -118,6 +128,27 @@ export default function Setup({ text, onText, settings, onSettings, onPlay }: Pr
   }, [onPlay]);
 
   const canPlay = voice || stats.words > 0;
+
+  const fogUsed = s.entrance === "nebula" || s.exit === "smoke";
+  const tabs = TABS.filter((t) => t.id !== "fog" || fogUsed);
+  const [tabChoice, setTabChoice] = useState<Tab>("mode");
+  useEffect(() => {
+    try {
+      const t = localStorage.getItem("words.setupTab") as Tab | null;
+      if (t && TABS.some((x) => x.id === t)) setTabChoice(t);
+    } catch {
+      // ignore
+    }
+  }, []);
+  const chooseTab = (t: Tab) => {
+    setTabChoice(t);
+    try {
+      localStorage.setItem("words.setupTab", t);
+    } catch {
+      // ignore
+    }
+  };
+  const tab: Tab = tabs.some((t) => t.id === tabChoice) ? tabChoice : "mode";
 
   return (
     <main className="setup">
@@ -215,10 +246,10 @@ export default function Setup({ text, onText, settings, onSettings, onPlay }: Pr
           </p>
         </section>
 
-        {/* ─────────────── II. The staging ─────────────── */}
+        {/* ─────────────── II. The stage ─────────────── */}
         <section className="col col--stage">
           <h2 className="act">
-            <span className="act__num">II.</span> The Staging
+            <span className="act__num">II.</span> The Stage
           </h2>
 
           <div className="preview-dock">
@@ -232,6 +263,19 @@ export default function Setup({ text, onText, settings, onSettings, onPlay }: Pr
             </div>
           </div>
 
+          <Setups
+            settings={settings}
+            text={text}
+            onLoad={(next, t) => {
+              onSettings(next);
+              if (t !== undefined) onText(t);
+            }}
+          />
+
+          <div className="looks-head">
+            <h3 className="setups__title">Looks</h3>
+            <span className="note">Starting points: they change the effects, not the text or the voice setup.</span>
+          </div>
           <div className="looks">
             {LOOKS.map((l) => (
               <button
@@ -245,146 +289,186 @@ export default function Setup({ text, onText, settings, onSettings, onPlay }: Pr
               </button>
             ))}
           </div>
+        </section>
 
-          <Group title="Mode">
-            <div className="modes">
-              {MODES.map((m) => (
-                <button
-                  key={m.value}
-                  className={`mode ${s.mode === m.value ? "is-active" : ""}`}
-                  onClick={() => onSettings({ ...settings, mode: m.value, ...MODE_DEFAULTS[m.value] })}
-                >
-                  <span className="mode__label">{m.label}</span>
-                  <span className="mode__blurb">{m.blurb}</span>
-                </button>
-              ))}
-            </div>
-            {s.mode === "word" && (
+        {/* ─────────────── III. The staging ─────────────── */}
+        <section className="col col--controls">
+          <h2 className="act">
+            <span className="act__num">III.</span> The Staging
+          </h2>
+          <div className="tabs" role="tablist">
+            {tabs.map((t) => (
+              <button
+                key={t.id}
+                role="tab"
+                aria-selected={tab === t.id}
+                className={`tabs__tab ${tab === t.id ? "is-active" : ""}`}
+                onClick={() => chooseTab(t.id)}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+
+          <div className="tabpanel" role="tabpanel">
+            {tab === "mode" && (
               <>
-                <Slider label="Wander" value={s.jitter} min={0} max={1} step={0.05} onChange={(v) => set("jitter", v)} format={pct} />
-                <Slider
-                  label="Leave on its own after"
-                  value={s.autoExit}
-                  min={0}
-                  max={15}
-                  step={0.5}
-                  onChange={(v) => set("autoExit", v)}
-                  format={(v) => (v === 0 ? "never" : `${v}s`)}
-                />
-              </>
-            )}
-            {s.mode === "line" && (
-              <Slider label="Lines at once" value={s.linesAtOnce} min={1} max={4} step={1} onChange={(v) => set("linesAtOnce", v)} format={(v) => `${v}`} />
-            )}
-            {s.mode === "page" && (
-              <Slider label="Max lines per page" value={s.maxPageLines} min={4} max={24} step={1} onChange={(v) => set("maxPageLines", v)} format={(v) => `${v}`} />
-            )}
-            {s.mode === "paragraph" && (
-              <>
-                <Slider label="Lines per paragraph" value={s.paragraphLines} min={2} max={10} step={1} onChange={(v) => set("paragraphLines", v)} format={(v) => `${v}`} />
-                <Slider label="Paragraph width" value={s.paragraphWidth} min={0.25} max={0.7} step={0.01} onChange={(v) => set("paragraphWidth", v)} format={pct} />
-                <Slider label="Each word stays readable for" value={s.paragraphLinger} min={0.25} max={20} step={0.25} onChange={(v) => set("paragraphLinger", v)} format={secs} />
-                <Slider label="Then leaves over" value={s.paragraphFade} min={0.3} max={6} step={0.1} onChange={(v) => set("paragraphFade", v)} format={secs} />
-                <Slider label="Spoken words" value={s.spokenLevel} min={0.1} max={1} step={0.01} onChange={(v) => set("spokenLevel", v)} format={pct} />
-                <div className="row">
-                  {voice ? (
-                    <Toggle label="New paragraph after a pause" value={s.paragraphOnPause} onChange={(v) => set("paragraphOnPause", v)} />
-                  ) : (
-                    <Toggle label="New paragraph at stanza" value={s.stanzaBreaks} onChange={(v) => set("stanzaBreaks", v)} />
-                  )}
+              <Group title="Mode">
+                <div className="modes">
+                  {MODES.map((m) => (
+                    <button
+                      key={m.value}
+                      className={`mode ${s.mode === m.value ? "is-active" : ""}`}
+                      onClick={() => onSettings({ ...settings, mode: m.value, ...MODE_DEFAULTS[m.value] })}
+                    >
+                      <span className="mode__label">{m.label}</span>
+                      <span className="mode__blurb">{m.blurb}</span>
+                    </button>
+                  ))}
                 </div>
-                <p className="note">
-                  Each word forms with the entrance effect, stays readable for a set time, then leaves with the exit effect below,
-                  so the paragraph clears away as it is being written. A new paragraph begins elsewhere when this one is full
-                  {voice ? ", or at a pause once it has a few words" : ""}.
-                </p>
+                {s.mode === "word" && (
+                  <>
+                    <Slider label="Wander" value={s.jitter} min={0} max={1} step={0.05} onChange={(v) => set("jitter", v)} format={pct} />
+                    <Slider
+                      label="Leave on its own after"
+                      value={s.autoExit}
+                      min={0}
+                      max={15}
+                      step={0.5}
+                      onChange={(v) => set("autoExit", v)}
+                      format={(v) => (v === 0 ? "never" : `${v}s`)}
+                    />
+                  </>
+                )}
+                {s.mode === "line" && (
+                  <Slider label="Lines at once" value={s.linesAtOnce} min={1} max={4} step={1} onChange={(v) => set("linesAtOnce", v)} format={(v) => `${v}`} />
+                )}
+                {s.mode === "page" && (
+                  <Slider label="Max lines per page" value={s.maxPageLines} min={4} max={24} step={1} onChange={(v) => set("maxPageLines", v)} format={(v) => `${v}`} />
+                )}
+                {s.mode === "paragraph" && (
+                  <>
+                    <Slider label="Lines per paragraph" value={s.paragraphLines} min={2} max={10} step={1} onChange={(v) => set("paragraphLines", v)} format={(v) => `${v}`} />
+                    <Slider label="Paragraph width" value={s.paragraphWidth} min={0.25} max={0.7} step={0.01} onChange={(v) => set("paragraphWidth", v)} format={pct} />
+                    <Slider label="Each word stays readable for" value={s.paragraphLinger} min={0.25} max={20} step={0.25} onChange={(v) => set("paragraphLinger", v)} format={secs} />
+                    <Slider label="Then leaves over" value={s.paragraphFade} min={0.3} max={6} step={0.1} onChange={(v) => set("paragraphFade", v)} format={secs} />
+                    <Slider label="Spoken words" value={s.spokenLevel} min={0.1} max={1} step={0.01} onChange={(v) => set("spokenLevel", v)} format={pct} />
+                    <div className="row">
+                      {voice ? (
+                        <Toggle label="New paragraph after a pause" value={s.paragraphOnPause} onChange={(v) => set("paragraphOnPause", v)} />
+                      ) : (
+                        <Toggle label="New paragraph at stanza" value={s.stanzaBreaks} onChange={(v) => set("stanzaBreaks", v)} />
+                      )}
+                    </div>
+                    <p className="note">
+                      Each word forms with the entrance effect, stays readable for a set time, then leaves with the exit effect below,
+                      so the paragraph clears away as it is being written. A new paragraph begins elsewhere when this one is full
+                      {voice ? ", or at a pause once it has a few words" : ""}.
+                    </p>
+                  </>
+                )}
+                {(s.mode === "line" || s.mode === "page") && (
+                  <>
+                    <Slider label="Unspoken words" value={s.ghost} min={0} max={0.45} step={0.01} onChange={(v) => set("ghost", v)} format={(v) => (v === 0 ? "hidden" : pct(v))} />
+                    <Slider label="Spoken words" value={s.spokenLevel} min={0.1} max={1} step={0.01} onChange={(v) => set("spokenLevel", v)} format={pct} />
+                    <div className="row">
+                      <Segmented
+                        value={s.align}
+                        options={[
+                          { value: "center", label: "Centred" },
+                          { value: "left", label: "Book" },
+                        ]}
+                        onChange={(v) => set("align", v)}
+                      />
+                      <Toggle label="New page at stanza" value={s.stanzaBreaks} onChange={(v) => set("stanzaBreaks", v)} />
+                    </div>
+                  </>
+                )}
+              </Group>
+
               </>
             )}
-            {(s.mode === "line" || s.mode === "page") && (
+            {tab === "type" && (
               <>
-                <Slider label="Unspoken words" value={s.ghost} min={0} max={0.45} step={0.01} onChange={(v) => set("ghost", v)} format={(v) => (v === 0 ? "hidden" : pct(v))} />
-                <Slider label="Spoken words" value={s.spokenLevel} min={0.1} max={1} step={0.01} onChange={(v) => set("spokenLevel", v)} format={pct} />
-                <div className="row">
-                  <Segmented
-                    value={s.align}
-                    options={[
-                      { value: "center", label: "Centred" },
-                      { value: "left", label: "Book" },
-                    ]}
-                    onChange={(v) => set("align", v)}
-                  />
-                  <Toggle label="New page at stanza" value={s.stanzaBreaks} onChange={(v) => set("stanzaBreaks", v)} />
+              <Group title="Typeface">
+                <div className="fonts">
+                  {FONTS.map((f) => (
+                    <button
+                      key={f.id}
+                      className={`font ${s.font === f.id ? "is-active" : ""} ${needsCzech && !f.czech ? "is-lacking" : ""}`}
+                      onClick={() => set("font", f.id)}
+                      title={needsCzech && !f.czech ? "No Czech letters (ř, ě, ů…): they would show in a fallback face" : undefined}
+                    >
+                      <span className="font__sample" style={{ fontFamily: f.family }}>
+                        {f.id === "cinzel" || f.id === "cinzel-decorative" ? "Thou Art" : "Thou art"}
+                      </span>
+                      <span className="font__name">{f.label}</span>
+                    </button>
+                  ))}
                 </div>
+                {needsCzech && !font.czech && (
+                  <p className="note note--warn">{font.label} has no Czech letters (ř, ě, ů…). Choose another typeface.</p>
+                )}
+                <Slider label="Size" value={s.size} min={0.4} max={2} step={0.05} onChange={(v) => set("size", v)} format={(v) => `${Math.round(v * 100)}%`} />
+                <div className="row">
+                  <Toggle label="Italic" value={s.italic && font.hasItalic} disabled={!font.hasItalic} onChange={(v) => set("italic", v)} />
+                  <Toggle label="Capitals" value={s.caps} onChange={(v) => set("caps", v)} />
+                  <Toggle label="Long ſ (Folio spelling)" value={s.longS} onChange={(v) => set("longS", v)} />
+                </div>
+              </Group>
+
               </>
             )}
-          </Group>
+            {tab === "motion" && (
+              <>
+              <Group title="Entrance">
+                <Segmented value={s.entrance} options={ENTRANCES} onChange={(v) => set("entrance", v)} />
+                <p className="note">{ENTRANCE_NOTES[s.entrance]}</p>
+                <Slider label="Duration" value={s.entranceDuration} min={0.2} max={4} step={0.1} onChange={(v) => set("entranceDuration", v)} format={secs} />
+                {s.entrance !== "quill" && (
+                  <Slider label="Letter stagger" value={s.entranceStagger} min={0} max={1} step={0.05} onChange={(v) => set("entranceStagger", v)} format={pct} />
+                )}
+              </Group>
 
-          <Group title="Typeface">
-            <div className="fonts">
-              {FONTS.map((f) => (
-                <button
-                  key={f.id}
-                  className={`font ${s.font === f.id ? "is-active" : ""} ${needsCzech && !f.czech ? "is-lacking" : ""}`}
-                  onClick={() => set("font", f.id)}
-                  title={needsCzech && !f.czech ? "No Czech letters (ř, ě, ů…): they would show in a fallback face" : undefined}
-                >
-                  <span className="font__sample" style={{ fontFamily: f.family }}>
-                    {f.id === "cinzel" || f.id === "cinzel-decorative" ? "Thou Art" : "Thou art"}
-                  </span>
-                  <span className="font__name">{f.label}</span>
-                </button>
-              ))}
-            </div>
-            {needsCzech && !font.czech && (
-              <p className="note note--warn">{font.label} has no Czech letters (ř, ě, ů…). Choose another typeface.</p>
+              <Group title="Exit">
+                <Segmented value={s.exit} options={EXITS} onChange={(v) => set("exit", v)} />
+                <p className="note">{EXIT_NOTES[s.exit]}</p>
+                <Slider label="Duration" value={s.exitDuration} min={0.5} max={12} step={0.25} onChange={(v) => set("exitDuration", v)} format={secs} />
+                {s.exit !== "dissolve" && (
+                  <Slider label="Letter stagger" value={s.exitStagger} min={0} max={1} step={0.05} onChange={(v) => set("exitStagger", v)} format={pct} />
+                )}
+                <Slider label="Gravity" value={s.gravity} min={0} max={1} step={0.05} onChange={(v) => set("gravity", v)} format={pct} />
+                <Slider label="Turbulence" value={s.turbulence} min={0} max={1} step={0.05} onChange={(v) => set("turbulence", v)} format={pct} />
+              </Group>
+
+              </>
             )}
-            <Slider label="Size" value={s.size} min={0.4} max={2} step={0.05} onChange={(v) => set("size", v)} format={(v) => `${Math.round(v * 100)}%`} />
-            <div className="row">
-              <Toggle label="Italic" value={s.italic && font.hasItalic} disabled={!font.hasItalic} onChange={(v) => set("italic", v)} />
-              <Toggle label="Capitals" value={s.caps} onChange={(v) => set("caps", v)} />
-              <Toggle label="Long ſ (Folio spelling)" value={s.longS} onChange={(v) => set("longS", v)} />
-            </div>
-          </Group>
-
-          <Group title="Entrance">
-            <Segmented value={s.entrance} options={ENTRANCES} onChange={(v) => set("entrance", v)} />
-            <p className="note">{ENTRANCE_NOTES[s.entrance]}</p>
-            <Slider label="Duration" value={s.entranceDuration} min={0.2} max={4} step={0.1} onChange={(v) => set("entranceDuration", v)} format={secs} />
-            {s.entrance !== "quill" && (
-              <Slider label="Letter stagger" value={s.entranceStagger} min={0} max={1} step={0.05} onChange={(v) => set("entranceStagger", v)} format={pct} />
+            {tab === "fog" && (
+              <>
+              <Group title="Fog">
+                <Slider label="Fog size" value={s.fogSize} min={0.5} max={2.5} step={0.05} onChange={(v) => set("fogSize", v)} format={pct} />
+                <Slider label="Fog strength" value={s.fogStrength} min={0.2} max={1.5} step={0.05} onChange={(v) => set("fogStrength", v)} format={pct} />
+                <p className="note">How large the nebula and smoke around each word are, and how visible. Larger fog reads best a little fainter.</p>
+                <Slider label="Noise layers" value={s.smokeLayers} min={1} max={4} step={1} onChange={(v) => set("smokeLayers", v)} format={(v) => `${v}`} />
+                <Slider label="Noise intensity" value={s.smokeNoise} min={0} max={1} step={0.05} onChange={(v) => set("smokeNoise", v)} format={pct} />
+                <Slider label="Noise contrast" value={s.smokeContrast} min={0.5} max={3} step={0.05} onChange={(v) => set("smokeContrast", v)} format={(v) => `${v.toFixed(2)}×`} />
+                <p className="note">Each puff is a soft radial gradient multiplied through a smoke texture at a random, slowly turning angle. More layers add finer wisps (one texture lookup each) — 2 is plenty on most displays.</p>
+              </Group>
+              </>
             )}
-          </Group>
+            {tab === "air" && (
+              <>
+              <Group title="Atmosphere">
+                <Slider label="Glow" value={s.glow} min={0} max={1.5} step={0.05} onChange={(v) => set("glow", v)} format={pct} />
+                <Slider label="Breathing" value={s.breathing} min={0} max={1} step={0.05} onChange={(v) => set("breathing", v)} format={pct} />
+                <Slider label="Camera drift" value={s.cameraDrift} min={0} max={1} step={0.05} onChange={(v) => set("cameraDrift", v)} format={pct} />
+                <Slider label="Stage dust" value={s.dust} min={0} max={1} step={0.05} onChange={(v) => set("dust", v)} format={(v) => (v === 0 ? "none" : pct(v))} />
+                <Slider label="Film grain" value={s.grain} min={0} max={0.12} step={0.005} onChange={(v) => set("grain", v)} format={(v) => (v === 0 ? "none — pure black" : pct(v / 0.12))} />
+              </Group>
 
-          <Group title="Exit">
-            <Segmented value={s.exit} options={EXITS} onChange={(v) => set("exit", v)} />
-            <p className="note">{EXIT_NOTES[s.exit]}</p>
-            <Slider label="Duration" value={s.exitDuration} min={0.5} max={12} step={0.25} onChange={(v) => set("exitDuration", v)} format={secs} />
-            {s.exit !== "dissolve" && (
-              <Slider label="Letter stagger" value={s.exitStagger} min={0} max={1} step={0.05} onChange={(v) => set("exitStagger", v)} format={pct} />
+              </>
             )}
-            <Slider label="Gravity" value={s.gravity} min={0} max={1} step={0.05} onChange={(v) => set("gravity", v)} format={pct} />
-            <Slider label="Turbulence" value={s.turbulence} min={0} max={1} step={0.05} onChange={(v) => set("turbulence", v)} format={pct} />
-          </Group>
-
-          {(s.entrance === "nebula" || s.exit === "smoke") && (
-            <Group title="Fog">
-              <Slider label="Fog size" value={s.fogSize} min={0.5} max={2.5} step={0.05} onChange={(v) => set("fogSize", v)} format={pct} />
-              <Slider label="Fog strength" value={s.fogStrength} min={0.2} max={1.5} step={0.05} onChange={(v) => set("fogStrength", v)} format={pct} />
-              <p className="note">How large the nebula and smoke around each word are, and how visible. Larger fog reads best a little fainter.</p>
-              <Slider label="Noise layers" value={s.smokeLayers} min={1} max={4} step={1} onChange={(v) => set("smokeLayers", v)} format={(v) => `${v}`} />
-              <Slider label="Noise intensity" value={s.smokeNoise} min={0} max={1} step={0.05} onChange={(v) => set("smokeNoise", v)} format={pct} />
-              <Slider label="Noise contrast" value={s.smokeContrast} min={0.5} max={3} step={0.05} onChange={(v) => set("smokeContrast", v)} format={(v) => `${v.toFixed(2)}×`} />
-              <p className="note">Each puff is a soft radial gradient multiplied through a smoke texture at a random, slowly turning angle. More layers add finer wisps (one texture lookup each) — 2 is plenty on most displays.</p>
-            </Group>
-          )}
-
-          <Group title="Atmosphere">
-            <Slider label="Glow" value={s.glow} min={0} max={1.5} step={0.05} onChange={(v) => set("glow", v)} format={pct} />
-            <Slider label="Breathing" value={s.breathing} min={0} max={1} step={0.05} onChange={(v) => set("breathing", v)} format={pct} />
-            <Slider label="Camera drift" value={s.cameraDrift} min={0} max={1} step={0.05} onChange={(v) => set("cameraDrift", v)} format={pct} />
-            <Slider label="Stage dust" value={s.dust} min={0} max={1} step={0.05} onChange={(v) => set("dust", v)} format={(v) => (v === 0 ? "none" : pct(v))} />
-            <Slider label="Film grain" value={s.grain} min={0} max={0.12} step={0.005} onChange={(v) => set("grain", v)} format={(v) => (v === 0 ? "none — pure black" : pct(v / 0.12))} />
-          </Group>
+          </div>
 
           <button
             className="reset-link"

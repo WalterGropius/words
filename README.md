@@ -64,9 +64,11 @@ In Line and Page mode, spoken words are written left to right into the frame. A 
 
 **Atmosphere:** glow, breathing, camera drift, stage dust, and optional film grain. With grain off, the background stays true black (0,0,0), so you can composite it with a screen or add blend.
 
-**Typefaces:** IM Fell English, DW Pica, French Canon, Double Pica (17th-century Fell types), Cormorant, EB Garamond, Cinzel, Cinzel Decorative, Tangerine (renaissance calligraphy), UnifrakturMaguntia, plus three modern sans serifs: Inter, DM Sans and Space Grotesk. There are also options for italic, capitals, and early-modern long ſ spelling.
+**Typefaces:** IM Fell English, DW Pica, French Canon, Double Pica (17th-century Fell types), Cormorant, EB Garamond, Cinzel, Cinzel Decorative, Tangerine (renaissance calligraphy), Meddon (quill handwriting), UnifrakturMaguntia, plus three modern sans serifs: Inter, DM Sans and Space Grotesk. There are also options for italic, capitals, and early-modern long ſ spelling.
 
-**Czech in the period faces:** Google Fonts serves the Fell types cut down to basic Latin, and Tangerine and UnifrakturMaguntia lack č ř ě ň ť ď ů. `scripts/czech-fonts.py` (needs `pip install fonttools brotli`) downloads the full fonts, composes the missing letters from each font's own accents, and writes them to `src/fonts/`, which the app loads instead. The output is committed, so you only rerun it to rebuild the fonts.
+**Saved setups:** under the rehearsal preview, name and save the current staging (with or without the text), load it back with one click, and update it when it changes. Setups live in the browser; Export/Import moves them between machines as a JSON file, for example from a laptop to the theatre's computer.
+
+**Czech in the period faces:** Google Fonts serves the Fell types and Meddon cut down to basic Latin, and Tangerine and UnifrakturMaguntia lack č ř ě ň ť ď ů. `scripts/czech-fonts.py` (needs `pip install fonttools brotli`) downloads the full fonts, composes the missing letters from each font's own accents, and writes them to `src/fonts/`, which the app loads instead. The output is committed, so you only rerun it to rebuild the fonts.
 
 Settings and text persist in `localStorage`.
 

@@ -5,12 +5,12 @@ Build Czech-ready copies of the period typefaces and write them to src/fonts/.
     pip install fonttools brotli
     python3 scripts/czech-fonts.py
 
-Google Fonts only serves the IM Fell faces with a "latin" subset, which strips
+Google Fonts only serves the IM Fell faces and Meddon with a "latin" subset, which strips
 č ř ě ů… even though Igino Marini's full fonts contain them. Tangerine and
 UnifrakturMaguntia really do lack the caron and ring letters (they have š ž
 but not č ř ě ň ť ď ů). So:
 
-  * Fell (all four, roman + italic): the complete, unmodified font, re-encoded
+  * Fell (all four, roman + italic) and Meddon: the complete, unmodified font, re-encoded
     as WOFF2 for the web.
   * Tangerine Bold, UnifrakturMaguntia: the missing letters are composed from
     the font's own base letters and its own caron / ring / apostrophe, placed
@@ -43,6 +43,7 @@ FONTS = [
     ("fell-dw-pica", "IM Fell DW Pica", "ital@0;1", None),
     ("fell-french-canon", "IM Fell French Canon", "ital@0;1", None),
     ("fell-double-pica", "IM Fell Double Pica", "ital@0;1", None),
+    ("meddon", "Meddon", None, None),
     ("tangerine", "Tangerine", "wght@700", "Words Script"),
     ("unifraktur", "UnifrakturMaguntia", None, "Words Fraktur"),
 ]
@@ -212,7 +213,7 @@ def main():
     OUT.mkdir(parents=True, exist_ok=True)
     for slug, family, axes, new_name in FONTS:
         for style, data in download(family, axes).items():
-            font = TTFont(io.BytesIO(data))
+            font = TTFont(io.BytesIO(data), recalcTimestamp=False)
             added = []
             if new_name:
                 added = compose_czech(font)

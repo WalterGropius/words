@@ -83,6 +83,13 @@ const tangerine = localFont({
   display: "block",
   preload: false,
 });
+// a quill-and-ink copperplate hand
+const meddon = localFont({
+  src: "../fonts/meddon-normal.woff2",
+  weight: "400",
+  display: "block",
+  preload: false,
+});
 const fraktur = localFont({
   src: "../fonts/unifraktur-normal.woff2",
   weight: "400",
@@ -122,6 +129,7 @@ export type FontId =
   | "cinzel"
   | "cinzel-decorative"
   | "tangerine"
+  | "meddon"
   | "fraktur"
   | "inter"
   | "dm-sans"
@@ -147,6 +155,7 @@ export const FONTS: FontDef[] = [
   { id: "cinzel", label: "Cinzel", note: "Roman capitals", family: cinzel.style.fontFamily, hasItalic: false, czech: true },
   { id: "cinzel-decorative", label: "Cinzel Decorative", note: "Monumental theatre capitals", family: cinzelDeco.style.fontFamily, hasItalic: false, czech: true },
   { id: "tangerine", label: "Tangerine", note: "Renaissance calligraphy", family: tangerine.style.fontFamily, hasItalic: false, czech: true },
+  { id: "meddon", label: "Meddon", note: "Quill handwriting", family: meddon.style.fontFamily, hasItalic: false, czech: true },
   { id: "fraktur", label: "Unifraktur", note: "Blackletter", family: fraktur.style.fontFamily, hasItalic: false, czech: true },
   { id: "inter", label: "Inter", note: "Neutral modern sans", family: inter.style.fontFamily, hasItalic: true, czech: true },
   { id: "dm-sans", label: "DM Sans", note: "Soft geometric sans", family: dmSans.style.fontFamily, hasItalic: true, czech: true },
