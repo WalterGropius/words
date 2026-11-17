@@ -19,7 +19,8 @@ export interface Settings {
   maxPageLines: number; // page mode
   paragraphLines: number; // paragraph mode: lines before a new paragraph begins
   paragraphWidth: number; // paragraph mode: 0.25..0.7 of the stage width
-  paragraphFade: number; // paragraph mode: seconds for the old paragraph to leave
+  paragraphLinger: number; // paragraph mode: seconds a word stays before it starts to fade
+  paragraphFade: number; // paragraph mode: seconds a word takes to leave
   paragraphOnPause: boolean; // paragraph mode, voice: a pause in speech starts a new paragraph
   stanzaBreaks: boolean;
   ghost: number; // 0..0.4 opacity of words not yet spoken
@@ -69,7 +70,8 @@ export const DEFAULT_SETTINGS: Settings = {
   maxPageLines: 14,
   paragraphLines: 4,
   paragraphWidth: 0.42,
-  paragraphFade: 1.2,
+  paragraphLinger: 4,
+  paragraphFade: 1.5,
   paragraphOnPause: true,
   stanzaBreaks: true,
   ghost: 0,
@@ -150,8 +152,8 @@ export const LOOKS: Look[] = [
   {
     id: "scattered",
     name: "Scattered",
-    blurb: "Paragraphs appear around the stage and burn away",
-    settings: { mode: "paragraph", entrance: "fade", exit: "dissolve", paragraphFade: 1.2, spokenLevel: 0.6, entranceDuration: 0.9 },
+    blurb: "Paragraphs written around the stage, burning away behind the pen",
+    settings: { mode: "paragraph", entrance: "fade", exit: "dissolve", paragraphLinger: 4, paragraphFade: 1.5, spokenLevel: 0.6, entranceDuration: 0.9 },
   },
   {
     id: "verse",

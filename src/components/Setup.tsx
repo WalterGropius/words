@@ -279,7 +279,8 @@ export default function Setup({ text, onText, settings, onSettings, onPlay }: Pr
               <>
                 <Slider label="Lines per paragraph" value={s.paragraphLines} min={2} max={10} step={1} onChange={(v) => set("paragraphLines", v)} format={(v) => `${v}`} />
                 <Slider label="Paragraph width" value={s.paragraphWidth} min={0.25} max={0.7} step={0.01} onChange={(v) => set("paragraphWidth", v)} format={pct} />
-                <Slider label="Old paragraph leaves in" value={s.paragraphFade} min={0.3} max={4} step={0.1} onChange={(v) => set("paragraphFade", v)} format={secs} />
+                <Slider label="Each word stays for" value={s.paragraphLinger} min={0.5} max={20} step={0.5} onChange={(v) => set("paragraphLinger", v)} format={secs} />
+                <Slider label="Then fades over" value={s.paragraphFade} min={0.3} max={4} step={0.1} onChange={(v) => set("paragraphFade", v)} format={secs} />
                 <Slider label="Spoken words" value={s.spokenLevel} min={0.1} max={1} step={0.01} onChange={(v) => set("spokenLevel", v)} format={pct} />
                 <div className="row">
                   {voice ? (
@@ -289,8 +290,9 @@ export default function Setup({ text, onText, settings, onSettings, onPlay }: Pr
                   )}
                 </div>
                 <p className="note">
-                  A paragraph moves on when it is full{voice ? ", or at a pause once it has a few words" : ""}. The old one leaves with
-                  the exit effect below, at this quicker pace.
+                  Each word starts to leave, with the exit effect below, a set time after it appears, so the paragraph fades away
+                  as it is being written. A new paragraph begins elsewhere when this one is full
+                  {voice ? ", or at a pause once it has a few words" : ""}.
                 </p>
               </>
             )}

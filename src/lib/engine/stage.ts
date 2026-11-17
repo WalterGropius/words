@@ -186,6 +186,8 @@ export class Stage {
   private segment: LiveWord[] = [];
   /** Where the latest paragraphs were put, so the next one goes elsewhere. */
   private paragraphBoxes: Box[] = [];
+  /** Paragraph mode: when each written word starts to leave (stage time). */
+  private fadeAt = new Map<WordActor, number>();
 
   private width = 1;
   private height = 1;
@@ -688,7 +690,9 @@ export class Stage {
     }
     if (L.row >= L.rows) {
       const paragraph = s.mode === "paragraph";
-      this.exitPage(paragraph ? s.paragraphFade : s.exitDuration);
+      // a paragraph's words leave on their own timers; a page leaves all at once
+      if (paragraph) this.lit.clear();
+      else this.exitPage();
       this.lastLive = null;
       // a new paragraph is elsewhere, so it needn't wait for the old one to clear
       L = this.liveFrame = this.newLiveFrame(paragraph ? 0 : Math.min(1.4, 0.25 + s.exitDuration * 0.18));
@@ -700,9 +704,12 @@ export class Stage {
     L.x = left + tw;
     const count = L.count++;
 
-    if (this.lastLive) this.lastLive.level = toLinear(s.spokenLevel);
+    if (this.lastLive && this.lastLive.phaseState !== "exit") this.lastLive.level = toLinear(s.spokenLevel);
     const a = this.makeActor(text, L.f, new Vector3(x, y, 0), 1, this.pagePhase(index));
-    a.beginEnter(this.enterOptions(Math.max(0, L.hold - this.time)), this.env());
+    const delay = Math.max(0, L.hold - this.time);
+    a.beginEnter(this.enterOptions(delay), this.env());
+    // the paragraph fades away behind the pen: each word leaves a while after it appears
+    if (s.mode === "paragraph") this.fadeAt.set(a, this.time + delay + s.paragraphLinger);
     this.lit.set(index, a);
     this.lastLive = a;
     return { text, index, actor: a, frame: L, ...pen, count };
@@ -711,6 +718,7 @@ export class Stage {
   /** Take a written word back off the stage and put the pen where it started. */
   private unwrite(w: LiveWord, seconds: number) {
     w.actor.fadeTo(0, seconds, true);
+    this.fadeAt.delete(w.actor);
     this.lit.delete(w.index);
     w.frame.row = w.row;
     w.frame.x = w.x;
@@ -812,7 +820,7 @@ export class Stage {
       this.current?.beginExit(this.exitOptions(), this.env());
       this.current = null;
     } else if (this.settings.mode === "paragraph") {
-      this.exitPage(this.settings.paragraphFade);
+      // the last words still leave on their own timers
       this.liveFrame = null;
       this.segment = [];
     } else {
@@ -823,6 +831,7 @@ export class Stage {
 
   private fadeAll(seconds: number) {
     for (const a of this.actors) a.fadeTo(0, seconds, true);
+    this.fadeAt.clear();
     this.lit.clear();
     this.ghosts.clear();
     this.current = null;
@@ -840,6 +849,7 @@ export class Stage {
     this.lastLive = null;
     this.segment = [];
     this.paragraphBoxes = [];
+    this.fadeAt.clear();
   }
 
   /** Re-flow the current page instantly after a resize. */
@@ -908,6 +918,14 @@ export class Stage {
     }
 
     const env = this.env();
+    if (this.fadeAt.size) {
+      const exit = this.exitOptions(0, s.paragraphFade);
+      for (const [a, at] of this.fadeAt) {
+        if (t < at) continue;
+        a.beginExit(exit, env);
+        this.fadeAt.delete(a);
+      }
+    }
     for (const a of this.actors) {
       a.update(dt, env);
       if (a.dead) {
