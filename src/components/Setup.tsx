@@ -371,6 +371,10 @@ export default function Setup({ text, onText, settings, onSettings, onPlay }: Pr
               <Slider label="Fog size" value={s.fogSize} min={0.5} max={2.5} step={0.05} onChange={(v) => set("fogSize", v)} format={pct} />
               <Slider label="Fog strength" value={s.fogStrength} min={0.2} max={1.5} step={0.05} onChange={(v) => set("fogStrength", v)} format={pct} />
               <p className="note">How large the nebula and smoke around each word are, and how visible. Larger fog reads best a little fainter.</p>
+              <Slider label="Noise layers" value={s.smokeLayers} min={1} max={4} step={1} onChange={(v) => set("smokeLayers", v)} format={(v) => `${v}`} />
+              <Slider label="Noise intensity" value={s.smokeNoise} min={0} max={1} step={0.05} onChange={(v) => set("smokeNoise", v)} format={pct} />
+              <Slider label="Noise contrast" value={s.smokeContrast} min={0.5} max={3} step={0.05} onChange={(v) => set("smokeContrast", v)} format={(v) => `${v.toFixed(2)}×`} />
+              <p className="note">Each puff is a soft radial gradient multiplied through a smoke texture at a random, slowly turning angle. More layers add finer wisps (one texture lookup each) — 2 is plenty on most displays.</p>
             </Group>
           )}
 

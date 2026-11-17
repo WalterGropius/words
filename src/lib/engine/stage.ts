@@ -938,6 +938,9 @@ export class Stage {
     pu.uTime.value = t;
     pu.uGravity.value = (s.gravity - 0.3) * 60;
     pu.uTurb.value = s.turbulence;
+    pu.uLayers.value = s.smokeLayers;
+    pu.uNoiseAmt.value = s.smokeNoise;
+    pu.uContrast.value = s.smokeContrast;
     this.particles.flush();
 
     const du = this.dust.material.uniforms;

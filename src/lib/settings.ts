@@ -48,6 +48,9 @@ export interface Settings {
   gravity: number; // 0..1
   fogSize: number; // nebula + smoke: 0.5..2.5 size of the cloud and its puffs
   fogStrength: number; // nebula + smoke: 0.2..1.5 how visible the fog is
+  smokeLayers: number; // nebula + smoke: 1..4 noise texture layers per puff
+  smokeNoise: number; // nebula + smoke: 0..1 how much noise breaks up each puff
+  smokeContrast: number; // nebula + smoke: 0.5..3 how hard-edged the wisps are
   turbulence: number; // 0..1
 
   // Atmosphere
@@ -100,6 +103,9 @@ export const DEFAULT_SETTINGS: Settings = {
   gravity: 0.3,
   fogSize: 1,
   fogStrength: 1,
+  smokeLayers: 2,
+  smokeNoise: 0.85,
+  smokeContrast: 1.6,
   turbulence: 0.45,
 
   glow: 0.55,

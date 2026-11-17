@@ -2,10 +2,84 @@ import {
   AdditiveBlending,
   BufferAttribute,
   BufferGeometry,
+  DataTexture,
   DynamicDrawUsage,
+  LinearFilter,
+  LinearMipmapLinearFilter,
   Points,
+  RepeatWrapping,
+  RGBAFormat,
   ShaderMaterial,
+  UnsignedByteType,
 } from "three";
+
+/**
+ * A tileable smoke texture, built once on the CPU: R is soft fBm, G is
+ * billowy fBm (folded octaves, puffier lobes). Smoke and nebula puffs sample
+ * it under a radial falloff with their own random, slowly turning rotation, so
+ * a puff a thousand pixels wide on a big display still has fine, wispy detail
+ * instead of a magnified blob — and it costs a texture fetch per layer rather
+ * than per-pixel procedural noise.
+ */
+function makeSmokeTexture(size = 256) {
+  const hash = (x: number, y: number, s: number) => {
+    let h = (x * 374761393 + y * 668265263 + s * 2147483647) | 0;
+    h = Math.imul(h ^ (h >>> 13), 1274126177);
+    return ((h ^ (h >>> 16)) >>> 0) / 4294967295;
+  };
+  // value noise on a lattice that wraps every `period` cells
+  const vnoise = (x: number, y: number, period: number, s: number) => {
+    const xi = Math.floor(x), yi = Math.floor(y);
+    const fx = x - xi, fy = y - yi;
+    const ux = fx * fx * fx * (fx * (fx * 6 - 15) + 10);
+    const uy = fy * fy * fy * (fy * (fy * 6 - 15) + 10);
+    const x0 = ((xi % period) + period) % period, x1 = (x0 + 1) % period;
+    const y0 = ((yi % period) + period) % period, y1 = (y0 + 1) % period;
+    const a = hash(x0, y0, s), b = hash(x1, y0, s), c = hash(x0, y1, s), d = hash(x1, y1, s);
+    return a + (b - a) * ux + (c - a) * uy + (a - b - c + d) * ux * uy;
+  };
+  const fbm = (x: number, y: number, s: number, billow: boolean) => {
+    let sum = 0, amp = 1, norm = 0, period = 4;
+    for (let o = 0; o < 6; o++) {
+      let n = vnoise((x * period) / size, (y * period) / size, period, s + o * 17);
+      if (billow) n = Math.abs(n * 2 - 1);
+      sum += n * amp;
+      norm += amp;
+      amp *= 0.5;
+      period *= 2;
+    }
+    return sum / norm;
+  };
+  const r = new Float32Array(size * size);
+  const g = new Float32Array(size * size);
+  for (let y = 0; y < size; y++)
+    for (let x = 0; x < size; x++) {
+      r[y * size + x] = fbm(x, y, 1, false);
+      g[y * size + x] = fbm(x, y, 7, true);
+    }
+  // stretch each channel to the full range so contrast behaves the same on both
+  const stretch = (ch: Float32Array) => {
+    let lo = Infinity, hi = -Infinity;
+    for (const v of ch) { if (v < lo) lo = v; if (v > hi) hi = v; }
+    const k = 255 / Math.max(1e-6, hi - lo);
+    return (i: number) => Math.round((ch[i] - lo) * k);
+  };
+  const sr = stretch(r), sg = stretch(g);
+  const data = new Uint8Array(size * size * 4);
+  for (let i = 0; i < size * size; i++) {
+    data[i * 4] = sr(i);
+    data[i * 4 + 1] = sg(i);
+    data[i * 4 + 2] = 0;
+    data[i * 4 + 3] = 255;
+  }
+  const tex = new DataTexture(data, size, size, RGBAFormat, UnsignedByteType);
+  tex.wrapS = tex.wrapT = RepeatWrapping;
+  tex.magFilter = LinearFilter;
+  tex.minFilter = LinearMipmapLinearFilter;
+  tex.generateMipmaps = true;
+  tex.needsUpdate = true;
+  return tex;
+}
 
 /**
  * One GPU particle pool for every dust / spark effect. Motion is computed
@@ -31,6 +105,8 @@ const vertexShader = /* glsl */ `
   varying float vHeat;
   varying float vSoft;
   varying float vSeed;
+  varying float vAge;
+  varying float vU;
   float grow = 1.0;
 
   void main() {
@@ -43,9 +119,13 @@ const vertexShader = /* glsl */ `
       vHeat = 0.0;
       vSoft = 0.0;
       vSeed = 0.0;
+      vAge = 0.0;
+      vU = 0.0;
       return;
     }
+    vAge = age;
     float u = age / life;
+    vU = u;
     float seed = aParams.z;
     vSeed = seed;
     vec3 p;
@@ -97,24 +177,47 @@ const vertexShader = /* glsl */ `
 
 const fragmentShader = /* glsl */ `
   uniform float uIntensity;
+  uniform sampler2D uNoise;
+  uniform float uLayers;    // 1..4 texture samples per puff
+  uniform float uNoiseAmt;  // 0..1 how much the noise breaks up the puff
+  uniform float uContrast;  // 0.5..3 how hard the wisps are
   varying float vAlpha;
   varying float vHeat;
   varying float vSoft;
   varying float vSeed;
-  float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
-  float noise(vec2 p) {
-    vec2 i = floor(p), f = fract(p);
-    f = f * f * (3.0 - 2.0 * f);
-    return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), f.x), mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), f.x), f.y);
-  }
+  varying float vAge;
+  varying float vU;
   void main() {
     vec2 pc = gl_PointCoord - 0.5;
     float d = length(pc);
     float a;
     if (vSoft > 0.5) {
-      // smoke and nebula: a soft, ragged puff rather than a disc
-      float n = noise(pc * 4.0 + vSeed * 53.0) * 0.65 + noise(pc * 9.0 + vSeed * 17.0) * 0.35;
-      a = exp(-d * d * 26.0) * smoothstep(0.5, 0.35, d) * (0.25 + 1.1 * n) * vAlpha;
+      // smoke and nebula: a radial falloff multiplied through layers of noise
+      // texture, each at its own random rotation that turns slowly with age
+      float spin = (fract(vSeed * 7.31) - 0.5) * 0.6;
+      float ang = vSeed * 6.2832 + vAge * spin;
+      float n = 0.0, wsum = 0.0, amp = 1.0, sc = 0.55;
+      for (int i = 0; i < 4; i++) {
+        if (float(i) >= uLayers) break;
+        float fi = float(i);
+        float r = ang + fi * 2.39996 * (1.0 + vSeed);
+        float c = cos(r), s = sin(r);
+        vec2 uv = mat2(c, s, -s, c) * pc * sc + vec2(vSeed * 3.7 + fi * 0.37, vSeed * 5.3 + fi * 0.61);
+        vec4 t = texture2D(uNoise, uv);
+        n += mix(t.r, t.g, mod(fi, 2.0)) * amp;
+        wsum += amp;
+        amp *= 0.6;
+        sc *= 2.2;
+      }
+      n /= wsum;
+      n = clamp((n - 0.5) * uContrast + 0.5, 0.0, 1.0);
+      // the noise eats into the falloff rather than just tinting it, so thin
+      // edges get carved away and the puff's outline is the smoke's, not a disc
+      float radial = exp(-d * d * 12.0);
+      // and more so as it ages: thinning smoke frays into wisps rather than
+      // drifting apart as separate balls
+      float v = radial - (1.0 - n) * uNoiseAmt * mix(0.7, 1.15, vU);
+      a = max(v, 0.0) * smoothstep(0.5, 0.38, d) * (1.0 + uNoiseAmt) * 0.9 * vAlpha;
     } else {
       // sparks and dust: crisp dots
       a = smoothstep(0.5, 0.1, d) * vAlpha;
@@ -153,6 +256,7 @@ export class ParticleSystem {
   private dirtyFrom = -1;
   private dirtyTo = -1;
   private wrapped = false;
+  private readonly noise = makeSmokeTexture();
 
   constructor(capacity = 160_000) {
     this.capacity = capacity;
@@ -183,6 +287,10 @@ export class ParticleSystem {
         uGravity: { value: 0 },
         uTurb: { value: 0.5 },
         uIntensity: { value: 1 },
+        uNoise: { value: this.noise },
+        uLayers: { value: 2 },
+        uNoiseAmt: { value: 0.85 },
+        uContrast: { value: 1.6 },
       },
       transparent: true,
       depthWrite: false,
@@ -249,5 +357,6 @@ export class ParticleSystem {
   dispose() {
     this.points.geometry.dispose();
     this.material.dispose();
+    this.noise.dispose();
   }
 }
