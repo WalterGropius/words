@@ -336,7 +336,7 @@ export default function Setup({ text, onText, settings, onSettings, onPlay }: Pr
               ))}
             </div>
             {needsCzech && !font.czech && (
-              <p className="note note--warn">{font.label} has no Czech letters (ř, ě, ů…). Choose Cormorant, EB Garamond, Cinzel or one of the sans serifs.</p>
+              <p className="note note--warn">{font.label} has no Czech letters (ř, ě, ů…). Choose Cormorant, EB Garamond, Cinzel, Meddon or one of the sans serifs.</p>
             )}
             <Slider label="Size" value={s.size} min={0.4} max={2} step={0.05} onChange={(v) => set("size", v)} format={(v) => `${Math.round(v * 100)}%`} />
             <div className="row">

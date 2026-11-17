@@ -10,6 +10,7 @@ import {
   Inter,
   DM_Sans,
   Space_Grotesk,
+  Meddon,
 } from "next/font/google";
 
 // All faces are Google Fonts (SIL Open Font License), self-hosted by next/font at
@@ -92,6 +93,14 @@ const spaceGrotesk = Space_Grotesk({
   preload: false,
 });
 
+// an 18th-century hand: quill copperplate
+const meddon = Meddon({
+  weight: "400",
+  subsets: ["latin", "latin-ext"],
+  display: "block",
+  preload: false,
+});
+
 export type FontId =
   | "fell-english"
   | "fell-pica"
@@ -103,7 +112,8 @@ export type FontId =
   | "fraktur"
   | "inter"
   | "dm-sans"
-  | "space-grotesk";
+  | "space-grotesk"
+  | "meddon";
 
 export interface FontDef {
   id: FontId;
@@ -127,6 +137,7 @@ export const FONTS: FontDef[] = [
   { id: "inter", label: "Inter", note: "Neutral modern sans", family: inter.style.fontFamily, hasItalic: true, czech: true },
   { id: "dm-sans", label: "DM Sans", note: "Soft geometric sans", family: dmSans.style.fontFamily, hasItalic: true, czech: true },
   { id: "space-grotesk", label: "Space Grotesk", note: "Quirky grotesque", family: spaceGrotesk.style.fontFamily, hasItalic: false, czech: true },
+  { id: "meddon", label: "Meddon", note: "18th-century hand", family: meddon.style.fontFamily, hasItalic: false, czech: true },
 ];
 
 export function getFont(id: FontId): FontDef {
