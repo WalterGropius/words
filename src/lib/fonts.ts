@@ -7,6 +7,9 @@ import {
   EB_Garamond,
   Cinzel,
   UnifrakturMaguntia,
+  Inter,
+  DM_Sans,
+  Space_Grotesk,
 } from "next/font/google";
 
 // All faces are Google Fonts (SIL Open Font License), self-hosted by next/font at
@@ -67,6 +70,28 @@ const fraktur = UnifrakturMaguntia({
   preload: false,
 });
 
+// modern sans serifs, all with Czech letters
+const inter = Inter({
+  weight: "400",
+  style: ["normal", "italic"],
+  subsets: ["latin", "latin-ext"],
+  display: "block",
+  preload: false,
+});
+const dmSans = DM_Sans({
+  weight: "400",
+  style: ["normal", "italic"],
+  subsets: ["latin", "latin-ext"],
+  display: "block",
+  preload: false,
+});
+const spaceGrotesk = Space_Grotesk({
+  weight: "400",
+  subsets: ["latin", "latin-ext"],
+  display: "block",
+  preload: false,
+});
+
 export type FontId =
   | "fell-english"
   | "fell-pica"
@@ -75,7 +100,10 @@ export type FontId =
   | "cormorant"
   | "garamond"
   | "cinzel"
-  | "fraktur";
+  | "fraktur"
+  | "inter"
+  | "dm-sans"
+  | "space-grotesk";
 
 export interface FontDef {
   id: FontId;
@@ -96,6 +124,9 @@ export const FONTS: FontDef[] = [
   { id: "garamond", label: "EB Garamond", note: "Renaissance classic", family: garamond.style.fontFamily, hasItalic: true, czech: true },
   { id: "cinzel", label: "Cinzel", note: "Roman capitals", family: cinzel.style.fontFamily, hasItalic: false, czech: true },
   { id: "fraktur", label: "Unifraktur", note: "Blackletter", family: fraktur.style.fontFamily, hasItalic: false, czech: false },
+  { id: "inter", label: "Inter", note: "Neutral modern sans", family: inter.style.fontFamily, hasItalic: true, czech: true },
+  { id: "dm-sans", label: "DM Sans", note: "Soft geometric sans", family: dmSans.style.fontFamily, hasItalic: true, czech: true },
+  { id: "space-grotesk", label: "Space Grotesk", note: "Quirky grotesque", family: spaceGrotesk.style.fontFamily, hasItalic: false, czech: true },
 ];
 
 export function getFont(id: FontId): FontDef {
