@@ -17,6 +17,19 @@ For the show, use a production build. Fonts are bundled at build time, so it run
 npm run build && npm start
 ```
 
+## Voice: live from the microphone (Soniox)
+
+Instead of pressing a key for each word, the show can listen and put each word on stage as it is spoken, using [Soniox](https://soniox.com) real-time speech-to-text (Czech by default).
+
+1. Create an API key in the [Soniox console](https://console.soniox.com).
+2. Put it in `.env.local` (copy `.env.example`): `SONIOX_API_KEY=...`, then restart `npm run dev`.
+3. In setup, switch **The Text** to **Voice (Soniox)**, pick the language, and press **Test the microphone**.
+4. Raise the curtain and speak. `M` mutes the mic, and the HUD shows the mic state and a running transcript for the operator.
+
+The real key stays on the server. `/api/soniox-key` hands the browser a single-use key that expires in a minute. Whatever is in the text box goes to Soniox as a vocabulary hint. Voice needs an internet connection and Chrome, Edge or Firefox (Safari records audio in a format Soniox can't detect). For Czech, use Cormorant, EB Garamond or Cinzel: the Fell types and Unifraktur have no ř, ě or ů.
+
+In Line and Page mode, spoken words are written left to right into the frame. A pause in speech starts a new line, and a full frame departs like a page.
+
 ## The two steps
 
 1. **Setup.** Paste the text (or pick a sonnet or soliloquy), choose a *Look* or tune every setting, and watch the live **Rehearsal** preview.
@@ -59,4 +72,5 @@ Every input goes through one command bus, `src/lib/commands.ts`. A WebSocket or 
 - `src/lib/engine/actor.ts`: one word made of letter quads, with its entrance, breathing, and exit physics.
 - `src/lib/engine/glyphs.ts`: rasterises each word into a per-letter canvas atlas.
 - `src/lib/engine/letterMaterial.ts`: letter shader (blur, quill wipe, burning dissolve edge).
+- `src/lib/soniox.ts`: microphone to Soniox WebSocket, turned into whole words. `src/app/api/soniox-key/route.ts` mints the temporary keys.
 - `src/lib/engine/particles.ts`: GPU particle pool for ash and gather effects. `dust.ts` holds the ambient motes.

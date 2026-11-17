@@ -27,6 +27,14 @@ function toLongS(word: string): string {
   });
 }
 
+/** Apply the typographic options to one word. */
+export function styleWord(word: string, opts: TextOptions): string {
+  let w = word;
+  if (opts.longS) w = toLongS(w);
+  if (opts.caps) w = w.toLocaleUpperCase().replace(/ſ/g, "S");
+  return w;
+}
+
 export function parseText(raw: string, opts: TextOptions): ParsedText {
   const tokens: Token[] = [];
   const lines: number[][] = [];
@@ -44,11 +52,9 @@ export function parseText(raw: string, opts: TextOptions): ParsedText {
     sawBlank = false;
     const lineIdx = lines.length;
     const ids: number[] = [];
-    for (let w of words) {
-      if (opts.longS) w = toLongS(w);
-      if (opts.caps) w = w.toLocaleUpperCase().replace(/ſ/g, "S");
+    for (const word of words) {
       ids.push(tokens.length);
-      tokens.push({ index: tokens.length, text: w, line: lineIdx, stanza });
+      tokens.push({ index: tokens.length, text: styleWord(word, opts), line: lineIdx, stanza });
     }
     lines.push(ids);
     lineStanza.push(stanza);

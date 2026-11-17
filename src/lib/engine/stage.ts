@@ -18,7 +18,7 @@ import { WordActor, randomDrift, toLinear, type ActorEnv, type EnterOptions, typ
 import { Dust } from "./dust";
 import { measureText, rasterizeWord, type FontSpec, type WordGlyphs } from "./glyphs";
 import { ParticleSystem } from "./particles";
-import { paginate, parseText, type ParsedText } from "./text";
+import { paginate, parseText, styleWord, type ParsedText } from "./text";
 
 export interface StageInfo {
   cursor: number;
@@ -28,6 +28,8 @@ export interface StageInfo {
   pages: number;
   blackout: boolean;
   ready: boolean;
+  /** Words come from the microphone rather than a script. */
+  live: boolean;
 }
 
 export interface StageOptions {
@@ -78,6 +80,20 @@ interface Slot {
   f: number;
 }
 
+/** Where live words are being written: a fixed frame that fills row by row. */
+interface LiveFrame {
+  f: number;
+  rows: number;
+  lineHeight: number;
+  maxW: number;
+  top: number;
+  row: number;
+  /** Pen position from the left edge of the frame. */
+  x: number;
+  /** Stage time before which new words must wait (the previous page is still leaving). */
+  hold: number;
+}
+
 /** Settings that change where/how big words are; changing them restarts the show. */
 function layoutKey(s: Settings) {
   return [s.mode, s.font, s.italic, s.caps, s.longS, s.size, s.linesAtOnce, s.maxPageLines, s.stanzaBreaks, s.align].join("|");
@@ -113,6 +129,9 @@ export class Stage {
   private lit = new Map<number, WordActor>();
   private ghosts = new Map<number, WordActor>();
   private current: WordActor | null = null;
+  private live = false;
+  private liveCount = 0;
+  private liveFrame: LiveFrame | null = null;
 
   private width = 1;
   private height = 1;
@@ -172,6 +191,7 @@ export class Stage {
     if (token !== this.loadToken || this.disposed) return;
     this.font = font;
     this.hardClear();
+    this.live = false;
     this.parsed = parseText(text, { caps: settings.caps, longS: settings.longS });
     this.pages =
       settings.mode === "word"
@@ -185,15 +205,61 @@ export class Stage {
     this.emit();
   }
 
+  /** Open an empty stage that is written by `speak()` as words are heard. */
+  async listen(settings: Settings) {
+    const token = ++this.loadToken;
+    this.settings = settings;
+    const def = getFont(settings.font);
+    const font = { family: def.family, italic: settings.italic && def.hasItalic };
+    await ensureFontLoaded(font.family, font.italic);
+    if (token !== this.loadToken || this.disposed) return;
+    this.font = font;
+    this.hardClear();
+    this.live = true;
+    this.parsed = { tokens: [], lines: [], lineStanza: [] };
+    this.pages = [];
+    this.tokenPage = [];
+    this.cursor = -1;
+    this.pageIndex = -1;
+    this.liveCount = 0;
+    this.liveFrame = null;
+    this.ready = true;
+    this.emit();
+  }
+
+  /** Put one heard word on stage (live mode). */
+  speak(raw: string) {
+    if (!this.ready || !this.live) return;
+    const s = this.settings;
+    const text = styleWord(raw, { caps: s.caps, longS: s.longS });
+    const index = this.liveCount++;
+    this.cursor = index;
+    if (s.mode === "word") {
+      this.current?.beginExit(this.exitOptions(), this.env());
+      this.current = this.spawnWord(text, this.enterOptions());
+    } else {
+      this.writeLive(index, text);
+    }
+    this.emit();
+  }
+
+  /** The speaker paused: the next word starts a new line (live verse modes). */
+  pause() {
+    const L = this.liveFrame;
+    if (!this.live || !L || L.x === 0) return;
+    L.row++;
+    L.x = 0;
+  }
+
   /** Live settings; anything affecting layout restarts from black. */
   setSettings(settings: Settings) {
     const restart = layoutKey(settings) !== layoutKey(this.settings);
     this.settings = settings;
-    if (restart) void this.load(this.text, settings);
+    if (restart) void (this.live ? this.listen(settings) : this.load(this.text, settings));
   }
 
   next() {
-    if (!this.ready) return;
+    if (!this.ready || this.live) return;
     const total = this.parsed.tokens.length;
     if (this.cursor >= total) return;
     this.cursor++;
@@ -204,7 +270,7 @@ export class Stage {
     }
     if (this.settings.mode === "word") {
       this.current?.beginExit(this.exitOptions(), this.env());
-      this.current = this.spawnWord(this.cursor, this.enterOptions());
+      this.current = this.spawnWord(this.parsed.tokens[this.cursor].text, this.enterOptions());
     } else {
       const p = this.tokenPage[this.cursor];
       let delay = 0;
@@ -222,7 +288,7 @@ export class Stage {
   }
 
   prev() {
-    if (!this.ready || this.cursor < 0) return;
+    if (!this.ready || this.live || this.cursor < 0) return;
     const total = this.parsed.tokens.length;
     const target = this.cursor - 1;
     const quick: EnterOptions = { effect: "fade", duration: 0.45, stagger: 0 };
@@ -230,7 +296,7 @@ export class Stage {
     if (this.settings.mode === "word") {
       this.current?.fadeTo(0, 0.3, true);
       this.cursor = target;
-      this.current = target >= 0 ? this.spawnWord(target, quick) : null;
+      this.current = target >= 0 ? this.spawnWord(this.parsed.tokens[target].text, quick) : null;
     } else if (this.cursor < total && target >= 0 && this.tokenPage[target] === this.pageIndex) {
       // un-speak the last word on this page
       this.lit.get(this.cursor)?.fadeTo(0, 0.3, true);
@@ -257,6 +323,8 @@ export class Stage {
     this.fadeAll(0.6);
     this.cursor = -1;
     this.pageIndex = -1;
+    this.liveCount = 0;
+    this.liveFrame = null;
     this.emit();
   }
 
@@ -266,15 +334,16 @@ export class Stage {
   }
 
   get info(): StageInfo {
-    const total = this.parsed.tokens.length;
+    const total = this.live ? this.liveCount : this.parsed.tokens.length;
     return {
       cursor: this.cursor,
       total,
-      ended: total > 0 && this.cursor >= total,
+      ended: !this.live && total > 0 && this.cursor >= total,
       page: this.pageIndex,
       pages: this.pages.length,
       blackout: this.masterTarget < 0.5,
       ready: this.ready,
+      live: this.live,
     };
   }
 
@@ -315,13 +384,12 @@ export class Stage {
     return { effect: s.exit, duration: s.exitDuration, stagger: s.exitStagger, delay };
   }
 
-  private spawnWord(index: number, enter: EnterOptions): WordActor {
-    const token = this.parsed.tokens[index];
+  private spawnWord(text: string, enter: EnterOptions): WordActor {
     const s = this.settings;
     const w = this.width;
     const h = this.height;
     let f = h * 0.13 * s.size;
-    let width = measureText(token.text, this.font, f);
+    let width = measureText(text, this.font, f);
     const maxW = w * 0.86;
     if (width > maxW) {
       f *= maxW / width;
@@ -332,7 +400,7 @@ export class Stage {
     const x = MathUtils.clamp(rand(-1, 1) * w * 0.16 * j, -room, room);
     const y = rand(-1, 1) * h * 0.12 * j;
     const z = rand(-1, 0.3) * 220 * j;
-    const actor = this.makeActor(token.text, f, new Vector3(x - width / 2, y - f * 0.3, z), 1);
+    const actor = this.makeActor(text, f, new Vector3(x - width / 2, y - f * 0.3, z), 1);
     actor.beginEnter(enter, this.env());
     return actor;
   }
@@ -475,6 +543,56 @@ export class Stage {
       ghost.fadeTo(0, delay > 0 ? 0.01 : Math.max(0.3, s.entranceDuration * 1.1), true);
       this.ghosts.delete(ti);
     }
+  }
+
+  /**
+   * Live verse modes: words are written into a fixed frame, left to right,
+   * row by row, so nothing already on stage has to move. When the frame is
+   * full the page departs and writing starts again at the top.
+   */
+  private writeLive(index: number, text: string) {
+    const s = this.settings;
+    let L = this.liveFrame;
+    if (!L) L = this.liveFrame = this.newLiveFrame(0);
+    const sp = measureText(" ", this.font, L.f) * 1.05;
+    const tw = measureText(text, this.font, L.f);
+    if (L.x > 0 && L.x + sp + tw > L.maxW) {
+      L.row++;
+      L.x = 0;
+    }
+    if (L.row >= L.rows) {
+      this.exitPage();
+      L = this.liveFrame = this.newLiveFrame(Math.min(1.4, 0.25 + s.exitDuration * 0.18));
+    }
+    const left = L.x + (L.x > 0 ? sp : 0);
+    const x = -L.maxW / 2 + left;
+    const y = L.top - (L.row + 0.5) * L.lineHeight * L.f - L.f * 0.3;
+    L.x = left + tw;
+
+    const prev = this.lit.get(index - 1);
+    if (prev) prev.level = toLinear(s.spokenLevel);
+    const a = this.makeActor(text, L.f, new Vector3(x, y, 0), 1, this.pagePhase(index));
+    a.beginEnter(this.enterOptions(Math.max(0, L.hold - this.time)), this.env());
+    this.lit.set(index, a);
+  }
+
+  private newLiveFrame(delay: number): LiveFrame {
+    const s = this.settings;
+    const h = this.height;
+    const rows = s.mode === "line" ? s.linesAtOnce : s.maxPageLines;
+    const lineHeight = 1.48;
+    const f0 = h * (s.mode === "line" ? 0.085 : 0.06) * s.size;
+    const f = Math.max(Math.min(f0, (h * 0.8) / (rows * lineHeight)), h * 0.022);
+    return {
+      f,
+      rows,
+      lineHeight,
+      maxW: this.width * 0.86,
+      top: (rows * lineHeight * f) / 2 + h * 0.015,
+      row: 0,
+      x: 0,
+      hold: this.time + delay,
+    };
   }
 
   /** Send the whole page off in a reading-order wave. */

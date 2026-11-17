@@ -4,8 +4,13 @@ export type Mode = "word" | "line" | "page";
 export type Entrance = "fade" | "quill" | "arrive" | "rise" | "materialize";
 export type Exit = "drift" | "fall" | "rise" | "dissolve" | "scatter" | "fade";
 export type Align = "center" | "left";
+export type Source = "script" | "voice";
 
 export interface Settings {
+  // Source
+  source: Source; // script = pressed word by word, voice = live from the mic via Soniox
+  language: string; // voice: ISO language hint, "" = detect
+
   // Staging
   mode: Mode;
   linesAtOnce: number; // line mode
@@ -45,6 +50,9 @@ export interface Settings {
 }
 
 export const DEFAULT_SETTINGS: Settings = {
+  source: "script",
+  language: "cs",
+
   mode: "word",
   linesAtOnce: 1,
   maxPageLines: 14,

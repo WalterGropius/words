@@ -832,3 +832,143 @@ kbd {
     display: none;
   }
 }
+
+/* voice source */
+.col--text > .segmented {
+  margin-bottom: 16px;
+}
+
+.voice {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-bottom: 20px;
+}
+
+.voice__label {
+  color: var(--faint);
+  font-style: italic;
+  font-size: 15px;
+}
+
+.voice .note {
+  margin: 0;
+}
+
+.mictest {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.mictest__btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  width: fit-content;
+  padding: 6px 16px 7px;
+  border: 1px solid var(--hair-strong);
+  color: var(--dim);
+  transition: color 0.2s, border-color 0.2s;
+}
+
+.mictest__btn:hover,
+.mictest__btn.is-on {
+  color: var(--fg);
+  border-color: var(--fg);
+}
+
+.mictest__out {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 15px;
+}
+
+.mictest__status {
+  color: var(--faint);
+  font-style: italic;
+}
+
+.mictest__text {
+  color: var(--fg);
+  font-size: 18px;
+  line-height: 1.4;
+}
+
+.note--warn {
+  color: var(--dim);
+}
+
+.font.is-lacking {
+  opacity: 0.4;
+}
+
+/* mic state, shared by the HUD and the setup test */
+.hud-mic {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 40vw;
+}
+
+.hud-mic__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--faint);
+  flex: none;
+}
+
+.hud-mic--listening .hud-mic__dot,
+.mictest__btn.is-on .hud-mic__dot {
+  background: #fff;
+  animation: mic-pulse 1.6s ease-in-out infinite;
+}
+
+.hud-mic--error {
+  color: var(--fg);
+}
+
+@keyframes mic-pulse {
+  50% {
+    opacity: 0.25;
+  }
+}
+
+/* operator caption (shown with the HUD) and errors (always shown) */
+.stage__caption,
+.stage__error {
+  position: absolute;
+  left: 50%;
+  bottom: 4vh;
+  transform: translateX(-50%);
+  width: min(900px, calc(100% - 32px));
+  text-align: center;
+  font-size: 16px;
+  line-height: 1.4;
+  pointer-events: none;
+}
+
+.stage__caption {
+  color: var(--faint);
+  opacity: 0;
+  transition: opacity 0.6s ease;
+}
+
+.stage__caption.is-on {
+  opacity: 1;
+}
+
+.stage__caption-pending {
+  opacity: 0.5;
+}
+
+.stage__error {
+  bottom: 9vh;
+  color: var(--dim);
+  font-style: italic;
+}
