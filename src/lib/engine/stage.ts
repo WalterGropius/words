@@ -18,7 +18,7 @@ import { WordActor, randomDrift, toLinear, type ActorEnv, type EnterOptions, typ
 import { Dust } from "./dust";
 import { measureText, rasterizeWord, type FontSpec, type WordGlyphs } from "./glyphs";
 import { ParticleSystem } from "./particles";
-import { paginate, parseText, type ParsedText } from "./text";
+import { paginate, parseText, styleWord, type ParsedText } from "./text";
 
 export interface StageInfo {
   cursor: number;
@@ -28,12 +28,22 @@ export interface StageInfo {
   pages: number;
   blackout: boolean;
   ready: boolean;
+  /** Words come from live speech rather than a script. */
+  live: boolean;
 }
 
 export interface StageOptions {
   onInfo?: (info: StageInfo) => void;
   /** Lower particle budget / resolution for the small setup preview. */
   preview?: boolean;
+  /** Live speech: no script up front, words are appended as they are spoken. */
+  live?: boolean;
+}
+
+export interface LiveWords {
+  words: string[];
+  /** The speaker paused: start a fresh line after these words. */
+  pause: boolean;
 }
 
 const CAMERA_DISTANCE = 1200;
@@ -126,6 +136,14 @@ export class Stage {
   private relayoutTimer: ReturnType<typeof setTimeout> | null = null;
   private disposed = false;
 
+  // live speech (verse modes lay words out left to right as they arrive)
+  private liveQueue: LiveWords[] = [];
+  private liveRow = -1;
+  private liveX = 0;
+  private liveBreak = false;
+  private liveFont = 0;
+  private livePageAt = 0;
+
   constructor(canvas: HTMLCanvasElement, settings: Settings, opts: StageOptions = {}) {
     this.canvas = canvas;
     this.settings = settings;
@@ -172,17 +190,48 @@ export class Stage {
     if (token !== this.loadToken || this.disposed) return;
     this.font = font;
     this.hardClear();
-    this.parsed = parseText(text, { caps: settings.caps, longS: settings.longS });
+    this.parsed = this.opts.live ? { tokens: [], lines: [], lineStanza: [] } : parseText(text, { caps: settings.caps, longS: settings.longS });
     this.pages =
-      settings.mode === "word"
+      settings.mode === "word" || this.opts.live
         ? []
         : paginate(this.parsed, settings.mode === "line" ? settings.linesAtOnce : settings.maxPageLines, settings.stanzaBreaks);
     this.tokenPage = [];
     this.pages.forEach((lines, p) => lines.forEach((li) => this.parsed.lines[li].forEach((ti) => (this.tokenPage[ti] = p))));
     this.cursor = -1;
     this.pageIndex = -1;
+    this.liveRow = -1;
+    this.liveBreak = false;
     this.ready = true;
     this.emit();
+    if (this.opts.live) {
+      const queued = this.liveQueue;
+      this.liveQueue = [];
+      queued.forEach((b) => this.appendLive(b));
+    }
+  }
+
+  /** Live speech: put freshly spoken words on stage. */
+  appendLive(batch: LiveWords) {
+    if (!this.opts.live || this.disposed) return;
+    if (!this.ready) {
+      this.liveQueue.push(batch);
+      return;
+    }
+    const s = this.settings;
+    for (const raw of batch.words) {
+      const text = styleWord(raw, { caps: s.caps, longS: s.longS });
+      const index = this.parsed.tokens.length;
+      this.parsed.tokens.push({ index, text, line: 0, stanza: 0 });
+      this.cursor = index;
+      if (s.mode === "word") {
+        this.current?.beginExit(this.exitOptions(), this.env());
+        this.current = this.spawnWord(index, this.enterOptions());
+      } else {
+        this.placeLiveWord(index);
+      }
+    }
+    if (batch.pause) this.liveBreak = true;
+    if (batch.words.length) this.emit();
   }
 
   /** Live settings; anything affecting layout restarts from black. */
@@ -193,7 +242,7 @@ export class Stage {
   }
 
   next() {
-    if (!this.ready) return;
+    if (!this.ready || this.opts.live) return;
     const total = this.parsed.tokens.length;
     if (this.cursor >= total) return;
     this.cursor++;
@@ -222,7 +271,7 @@ export class Stage {
   }
 
   prev() {
-    if (!this.ready || this.cursor < 0) return;
+    if (!this.ready || this.opts.live || this.cursor < 0) return;
     const total = this.parsed.tokens.length;
     const target = this.cursor - 1;
     const quick: EnterOptions = { effect: "fade", duration: 0.45, stagger: 0 };
@@ -255,8 +304,10 @@ export class Stage {
   /** Back to black, start of text. */
   reset() {
     this.fadeAll(0.6);
-    this.cursor = -1;
+    this.cursor = this.opts.live ? this.parsed.tokens.length - 1 : -1;
     this.pageIndex = -1;
+    this.liveRow = -1;
+    this.liveBreak = false;
     this.emit();
   }
 
@@ -270,11 +321,12 @@ export class Stage {
     return {
       cursor: this.cursor,
       total,
-      ended: total > 0 && this.cursor >= total,
+      ended: !this.opts.live && total > 0 && this.cursor >= total,
       page: this.pageIndex,
       pages: this.pages.length,
       blackout: this.masterTarget < 0.5,
       ready: this.ready,
+      live: Boolean(this.opts.live),
     };
   }
 
@@ -477,6 +529,64 @@ export class Stage {
     }
   }
 
+  /**
+   * Live verse modes: the words of a line aren't known until they're spoken,
+   * so they are set like type, left to right at a fixed size, wrapping to the
+   * next row; a pause starts a new row. When the rows are full ("Lines at
+   * once" in Line mode, the page height in Page mode) the page departs.
+   */
+  private placeLiveWord(ti: number) {
+    const s = this.settings;
+    const w = this.width;
+    const h = this.height;
+    const lh = 1.48;
+    const maxW = w * 0.86;
+    const sp = (f: number) => measureText(" ", this.font, f) * 1.05;
+
+    const startPage = (delay: number) => {
+      this.pageIndex++;
+      this.liveFont = h * (s.mode === "line" ? 0.085 : 0.06) * s.size;
+      this.liveRow = 0;
+      this.liveX = 0;
+      this.livePageAt = this.time + delay;
+    };
+
+    const text = this.parsed.tokens[ti].text;
+    if (this.liveRow < 0) startPage(0);
+    let f = this.liveFont;
+    let width = measureText(text, this.font, f);
+    const capacity =
+      s.mode === "line" ? Math.max(1, s.linesAtOnce) : Math.max(1, Math.min(s.maxPageLines, Math.floor((h * 0.8) / (lh * f))));
+
+    if (this.liveX > 0 && (this.liveBreak || this.liveX + sp(f) + width > maxW)) {
+      this.liveRow++;
+      this.liveX = 0;
+      if (this.liveRow >= capacity) {
+        this.exitPage();
+        startPage(Math.min(1.4, 0.25 + s.exitDuration * 0.18));
+        f = this.liveFont;
+        width = measureText(text, this.font, f);
+      }
+    }
+    this.liveBreak = false;
+    if (width > maxW) {
+      f *= maxW / width;
+      width = maxW;
+    }
+
+    const rows = s.mode === "line" ? Math.max(1, s.linesAtOnce) : capacity;
+    const top = (rows * lh * this.liveFont) / 2 + h * 0.015;
+    const y = top - (this.liveRow + 0.5) * lh * this.liveFont - this.liveFont * 0.3;
+    const x = -maxW / 2 + this.liveX + (this.liveX > 0 ? sp(f) : 0);
+    this.liveX = x + width + maxW / 2;
+
+    const prev = this.lit.get(ti - 1);
+    if (prev) prev.level = toLinear(s.spokenLevel);
+    const a = this.makeActor(text, f, new Vector3(x, y, 0), 1, this.pagePhase(ti));
+    a.beginEnter(this.enterOptions(Math.max(0, this.livePageAt - this.time)), this.env());
+    this.lit.set(ti, a);
+  }
+
   /** Send the whole page off in a reading-order wave. */
   private exitPage() {
     const s = this.settings;
@@ -519,7 +629,7 @@ export class Stage {
 
   /** Re-flow the current page instantly after a resize. */
   private relayout() {
-    if (!this.ready || this.settings.mode === "word" || this.pageIndex < 0) return;
+    if (!this.ready || this.opts.live || this.settings.mode === "word" || this.pageIndex < 0) return;
     for (const a of [...this.lit.values(), ...this.ghosts.values()]) {
       a.dispose();
       this.actors.delete(a);

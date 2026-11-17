@@ -1,4 +1,8 @@
 import type { FontId } from "./fonts";
+import { DEFAULT_LIVE, type LiveConfig } from "./soniox";
+
+/** Where the words come from: a prepared script, or live speech via Soniox. */
+export type Source = "script" | "live";
 
 export type Mode = "word" | "line" | "page";
 export type Entrance = "fade" | "quill" | "arrive" | "rise" | "materialize";
@@ -142,6 +146,8 @@ const STORAGE_KEY = "words.v1";
 export interface Persisted {
   text: string;
   settings: Settings;
+  source: Source;
+  live: LiveConfig;
 }
 
 export function loadPersisted(): Partial<Persisted> {
@@ -152,6 +158,8 @@ export function loadPersisted(): Partial<Persisted> {
     return {
       text: typeof parsed.text === "string" ? parsed.text : undefined,
       settings: parsed.settings ? { ...DEFAULT_SETTINGS, ...parsed.settings } : undefined,
+      source: parsed.source === "live" || parsed.source === "script" ? parsed.source : undefined,
+      live: parsed.live ? { ...DEFAULT_LIVE, ...parsed.live } : undefined,
     };
   } catch {
     return {};

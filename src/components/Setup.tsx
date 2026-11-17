@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { FONTS } from "@/lib/fonts";
 import {
   DEFAULT_SETTINGS,
@@ -10,8 +10,11 @@ import {
   type Exit,
   type Mode,
   type Settings,
+  type Source,
 } from "@/lib/settings";
+import { sonioxConfigured, type LiveConfig } from "@/lib/soniox";
 import { TEXTS } from "@/lib/texts";
+import LivePanel from "./LivePanel";
 import Preview from "./Preview";
 
 interface Props {
@@ -19,8 +22,17 @@ interface Props {
   onText: (t: string) => void;
   settings: Settings;
   onSettings: (s: Settings) => void;
+  source: Source;
+  onSource: (s: Source) => void;
+  live: LiveConfig;
+  onLive: (c: LiveConfig) => void;
   onPlay: () => void;
 }
+
+/** What the rehearsal performs while live speech is selected. */
+const LIVE_SAMPLE = `Slova, slova, slova.
+Každé vyslovené slovo vystoupí ze tmy,
+jakmile zazní.`;
 
 const MODES: { value: Mode; label: string; blurb: string }[] = [
   { value: "word", label: "Word", blurb: "One word at a time, centre stage. Each press sends the last one away." },
@@ -62,7 +74,7 @@ const EXIT_NOTES: Record<Exit, string> = {
   fade: "Simply fades.",
 };
 
-export default function Setup({ text, onText, settings, onSettings, onPlay }: Props) {
+export default function Setup({ text, onText, settings, onSettings, source, onSource, live, onLive, onPlay }: Props) {
   const set = <K extends keyof Settings>(key: K, value: Settings[K]) => onSettings({ ...settings, [key]: value });
   const s = settings;
 
@@ -76,6 +88,12 @@ export default function Setup({ text, onText, settings, onSettings, onPlay }: Pr
   const activePreset = TEXTS.find((t) => t.text.trim() === text.trim())?.id;
   const activeLook = LOOKS.find((l) => Object.entries(l.settings).every(([k, v]) => s[k as keyof Settings] === v))?.id;
   const font = FONTS.find((f) => f.id === s.font) ?? FONTS[0];
+  const isLive = source === "live";
+
+  const [configured, setConfigured] = useState<boolean | null>(null);
+  useEffect(() => {
+    if (isLive && configured === null) void sonioxConfigured().then(setConfigured);
+  }, [isLive, configured]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -88,7 +106,7 @@ export default function Setup({ text, onText, settings, onSettings, onPlay }: Pr
     return () => window.removeEventListener("keydown", onKey);
   }, [onPlay]);
 
-  const canPlay = stats.words > 0;
+  const canPlay = isLive ? configured !== false : stats.words > 0;
 
   return (
     <main className="setup">
@@ -102,7 +120,13 @@ export default function Setup({ text, onText, settings, onSettings, onPlay }: Pr
           </p>
         </div>
         <p className="setup__intro">
-          Paste a text, set the stage, raise the curtain. Then press <kbd>Space</kbd> as each word is spoken.
+          {isLive ? (
+            <>Set the stage, raise the curtain, and speak: each word appears as it is said.</>
+          ) : (
+            <>
+              Paste a text, set the stage, raise the curtain. Then press <kbd>Space</kbd> as each word is spoken.
+            </>
+          )}
         </p>
       </header>
 
@@ -112,6 +136,27 @@ export default function Setup({ text, onText, settings, onSettings, onPlay }: Pr
           <h2 className="act">
             <span className="act__num">I.</span> The Text
           </h2>
+          <div className="source">
+            <Segmented
+              value={source}
+              options={[
+                { value: "script", label: "Script" },
+                { value: "live", label: "Live speech" },
+              ]}
+              onChange={onSource}
+            />
+          </div>
+          {isLive ? (
+            <LivePanel
+              live={live}
+              onLive={onLive}
+              configured={configured}
+              script={text}
+              fontFamily={font.family}
+              fontStyle={s.italic && font.hasItalic ? "italic" : "normal"}
+            />
+          ) : (
+          <>
           <div className="chips">
             {TEXTS.map((t) => (
               <button key={t.id} className={`chip ${activePreset === t.id ? "is-active" : ""}`} onClick={() => onText(t.text)}>
@@ -132,6 +177,8 @@ export default function Setup({ text, onText, settings, onSettings, onPlay }: Pr
           <p className="meta">
             {stats.lines} lines &nbsp;·&nbsp; {stats.words} words &nbsp;·&nbsp; about {stats.time} spoken
           </p>
+          </>
+          )}
         </section>
 
         {/* ─────────────── II. The staging ─────────────── */}
@@ -142,7 +189,7 @@ export default function Setup({ text, onText, settings, onSettings, onPlay }: Pr
 
           <div className="preview-dock">
             <div className="preview">
-              <Preview text={text} settings={settings} />
+              <Preview text={isLive ? LIVE_SAMPLE : text} settings={settings} />
               <span className="preview__label">Rehearsal</span>
               <i className="corner corner--tl" />
               <i className="corner corner--tr" />
@@ -198,9 +245,12 @@ export default function Setup({ text, onText, settings, onSettings, onPlay }: Pr
             {s.mode === "page" && (
               <Slider label="Max lines per page" value={s.maxPageLines} min={4} max={24} step={1} onChange={(v) => set("maxPageLines", v)} format={(v) => `${v}`} />
             )}
+            {s.mode !== "word" && isLive && (
+              <p className="note">With live speech the lines are set left to right as they are spoken, and a pause starts a new line.</p>
+            )}
             {s.mode !== "word" && (
               <>
-                <Slider label="Unspoken words" value={s.ghost} min={0} max={0.45} step={0.01} onChange={(v) => set("ghost", v)} format={(v) => (v === 0 ? "hidden" : pct(v))} />
+                {!isLive && <Slider label="Unspoken words" value={s.ghost} min={0} max={0.45} step={0.01} onChange={(v) => set("ghost", v)} format={(v) => (v === 0 ? "hidden" : pct(v))} />}
                 <Slider label="Spoken words" value={s.spokenLevel} min={0.1} max={1} step={0.01} onChange={(v) => set("spokenLevel", v)} format={pct} />
                 <div className="row">
                   <Segmented
@@ -234,6 +284,7 @@ export default function Setup({ text, onText, settings, onSettings, onPlay }: Pr
               <Toggle label="Capitals" value={s.caps} onChange={(v) => set("caps", v)} />
               <Toggle label="Long ſ (Folio spelling)" value={s.longS} onChange={(v) => set("longS", v)} />
             </div>
+            {!font.czech && <p className="note">This face has no Czech accents of its own; letters like ř, ě and ů are borrowed from EB Garamond.</p>}
           </Group>
 
           <Group title="Entrance">
@@ -272,7 +323,15 @@ export default function Setup({ text, onText, settings, onSettings, onPlay }: Pr
 
       <footer className="setup__footer">
         <p className="footer__keys">
-          On stage: <kbd>Space</kbd> / <kbd>→</kbd> / clicker next · <kbd>←</kbd> back · <kbd>B</kbd> black · <kbd>F</kbd> fullscreen · <kbd>Esc</kbd> setup
+          {isLive ? (
+            <>
+              On stage: just speak · <kbd>B</kbd> black · <kbd>R</kbd> clear · <kbd>F</kbd> fullscreen · <kbd>Esc</kbd> setup
+            </>
+          ) : (
+            <>
+              On stage: <kbd>Space</kbd> / <kbd>→</kbd> / clicker next · <kbd>←</kbd> back · <kbd>B</kbd> black · <kbd>F</kbd> fullscreen · <kbd>Esc</kbd> setup
+            </>
+          )}
         </p>
         <button className="curtain" onClick={onPlay} disabled={!canPlay}>
           <span className="curtain__label">Raise the curtain</span>

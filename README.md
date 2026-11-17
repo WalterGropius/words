@@ -17,6 +17,28 @@ For the show, use a production build. Fonts are bundled at build time, so it run
 npm run build && npm start
 ```
 
+## Live speech (Soniox)
+
+Instead of a prepared script, the words can come from live speech: pick **Live speech** under *I. The Text*, and every word appears on stage the moment it is spoken, recognised in real time by [Soniox](https://soniox.com) (`stt-rt-v6`). It is tuned for Czech out of the box.
+
+1. Put your Soniox API key on the server, in `.env.local` next to `package.json`:
+
+   ```bash
+   SONIOX_KEY=your-soniox-api-key
+   ```
+
+   The key needs the *Temporary API keys* and *Speech-to-Text* permissions. It never reaches the browser: the page asks `/api/soniox` for a short-lived, single-use key and streams the microphone straight to Soniox with that.
+2. Restart the app, choose **Live speech**, pick the spoken language (Czech by default) and the microphone, and use **Test the microphone** to see what Soniox hears.
+3. Raise the curtain and speak. No key presses: `B`, `R` (clear the stage), `F`, `H` and `Esc` still work.
+
+**Tuned for Czech:** recognition is restricted to the chosen language (`language_hints_strict`), so Czech never drifts into Slovak or Polish. The Fell types and Unifraktur have no Czech accents of their own, so letters such as ř, ě and ů are borrowed from EB Garamond; Cormorant, EB Garamond and Cinzel carry their own.
+
+**Prime with the script** sends the text from the *Script* tab to Soniox as context (up to ~9,000 characters), so names and quotations are recognised. Paste the Czech translation the speaker will quote. The built-in English presets are only sent when the language is English.
+
+In *Line* and *Page* modes, live words are set left to right as they are spoken; a pause starts a new line, and the page departs when it is full. *Word* mode works as usual, and *Leave on its own after* clears the stage when the speaker pauses. If the connection drops, it reconnects by itself; the HUD shows the state.
+
+Live speech needs internet at the venue. Scripts do not.
+
 ## The two steps
 
 1. **Setup.** Paste the text (or pick a sonnet or soliloquy), choose a *Look* or tune every setting, and watch the live **Rehearsal** preview.
