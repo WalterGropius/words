@@ -1,19 +1,27 @@
 import type { FontId } from "./fonts";
-import { DEFAULT_LIVE, type LiveConfig } from "./soniox";
 
-/** Where the words come from: a prepared script, or live speech via Soniox. */
-export type Source = "script" | "live";
-
-export type Mode = "word" | "line" | "page";
-export type Entrance = "fade" | "quill" | "arrive" | "rise" | "materialize";
-export type Exit = "drift" | "fall" | "rise" | "dissolve" | "scatter" | "fade";
+export type Mode = "word" | "line" | "page" | "paragraph";
+export type Entrance = "nebula" | "fade" | "quill" | "arrive" | "rise" | "materialize";
+export type Exit = "smoke" | "drift" | "fall" | "rise" | "dissolve" | "scatter" | "fade";
 export type Align = "center" | "left";
+export type Source = "script" | "voice";
 
 export interface Settings {
+  // Source
+  source: Source; // script = pressed word by word, voice = live from the mic via Soniox
+  language: string; // voice: ISO language hint, "" = detect
+  liveTranscript: boolean; // voice: show words the moment they're heard, as flowing sentences
+  banned: string; // voice: comma-separated words never put on stage (fillers, hesitations)
+
   // Staging
   mode: Mode;
   linesAtOnce: number; // line mode
   maxPageLines: number; // page mode
+  paragraphLines: number; // paragraph mode: lines before a new paragraph begins
+  paragraphWidth: number; // paragraph mode: 0.25..0.7 of the stage width
+  paragraphLinger: number; // paragraph mode: seconds a word stays readable, once formed, before it starts to leave
+  paragraphFade: number; // paragraph mode: seconds a word takes to leave
+  paragraphOnPause: boolean; // paragraph mode, voice: a pause in speech starts a new paragraph
   stanzaBreaks: boolean;
   ghost: number; // 0..0.4 opacity of words not yet spoken
   spokenLevel: number; // 0.15..1 brightness of words already spoken (verse modes)
@@ -38,6 +46,8 @@ export interface Settings {
   exitDuration: number; // s
   exitStagger: number; // 0..1
   gravity: number; // 0..1
+  fogSize: number; // nebula + smoke: 0.5..2.5 size of the cloud and its puffs
+  fogStrength: number; // nebula + smoke: 0.2..1.5 how visible the fog is
   turbulence: number; // 0..1
 
   // Atmosphere
@@ -48,13 +58,28 @@ export interface Settings {
   grain: number; // 0..0.15
 }
 
+/** Czech hesitations and fillers. */
+export const DEFAULT_BANNED = "hm, mhm, mm, ehm, eh, em, e, é, uh, uhm, um, ah, ehe";
+
 export const DEFAULT_SETTINGS: Settings = {
-  mode: "word",
+  source: "script",
+  language: "cs",
+  liveTranscript: true,
+  banned: DEFAULT_BANNED,
+
+  // the director's brief: words appear out of a cosmic nebula, stay readable
+  // for a second or two, then dissolve like smoke carried off by a draft
+  mode: "paragraph",
   linesAtOnce: 1,
   maxPageLines: 14,
+  paragraphLines: 4,
+  paragraphWidth: 0.42,
+  paragraphLinger: 1.75,
+  paragraphFade: 3,
+  paragraphOnPause: true,
   stanzaBreaks: true,
   ghost: 0,
-  spokenLevel: 0.55,
+  spokenLevel: 0.6,
   align: "center",
   jitter: 0.35,
   autoExit: 0,
@@ -65,14 +90,16 @@ export const DEFAULT_SETTINGS: Settings = {
   longS: false,
   size: 1,
 
-  entrance: "fade",
-  entranceDuration: 1.1,
+  entrance: "nebula",
+  entranceDuration: 1.4,
   entranceStagger: 0.35,
 
-  exit: "fall",
-  exitDuration: 6,
+  exit: "smoke",
+  exitDuration: 3,
   exitStagger: 0.4,
   gravity: 0.3,
+  fogSize: 1,
+  fogStrength: 1,
   turbulence: 0.45,
 
   glow: 0.55,
@@ -87,6 +114,7 @@ export const MODE_DEFAULTS: Record<Mode, Partial<Settings>> = {
   word: {},
   line: { ghost: 0, spokenLevel: 0.6 },
   page: { ghost: 0.1, spokenLevel: 0.55 },
+  paragraph: { spokenLevel: 0.6 },
 };
 
 export interface Look {
@@ -97,6 +125,38 @@ export interface Look {
 }
 
 export const LOOKS: Look[] = [
+  {
+    id: "nebula",
+    name: "Nebula",
+    blurb: "Out of a cosmic nebula, gone again like smoke on a draft",
+    settings: {
+      mode: "paragraph",
+      entrance: "nebula",
+      exit: "smoke",
+      paragraphLinger: 1.75,
+      paragraphFade: 3,
+      spokenLevel: 0.6,
+      entranceDuration: 1.4,
+      fogSize: 1,
+      fogStrength: 1,
+    },
+  },
+  {
+    id: "mist",
+    name: "Mist",
+    blurb: "The same nebula and smoke, a larger fog but fainter",
+    settings: {
+      mode: "paragraph",
+      entrance: "nebula",
+      exit: "smoke",
+      paragraphLinger: 1.75,
+      paragraphFade: 3,
+      spokenLevel: 0.6,
+      entranceDuration: 1.4,
+      fogSize: 1.8,
+      fogStrength: 0.55,
+    },
+  },
   {
     id: "leaves",
     name: "Autumn",
@@ -128,6 +188,12 @@ export const LOOKS: Look[] = [
     settings: { mode: "word", entrance: "arrive", exit: "scatter", exitDuration: 3.5, turbulence: 0.8, entranceDuration: 1.2 },
   },
   {
+    id: "scattered",
+    name: "Scattered",
+    blurb: "Paragraphs written around the stage, burning away behind the pen",
+    settings: { mode: "paragraph", entrance: "fade", exit: "dissolve", paragraphLinger: 4, paragraphFade: 1.5, spokenLevel: 0.6, entranceDuration: 0.9 },
+  },
+  {
     id: "verse",
     name: "Verse",
     blurb: "Line by line, each word lights in place",
@@ -141,29 +207,41 @@ export const LOOKS: Look[] = [
   },
 ];
 
-const STORAGE_KEY = "words.v1";
+/**
+ * v2 made the nebula look the default. Staging saved under v1 is dropped so
+ * everyone starts from it; the text and the voice setup are carried over.
+ */
+const STORAGE_KEY = "words.v2";
+const LEGACY_KEY = "words.v1";
+const CARRIED_OVER = ["source", "language", "liveTranscript", "banned"] as const;
 
 export interface Persisted {
   text: string;
   settings: Settings;
-  source: Source;
-  live: LiveConfig;
 }
 
 export function loadPersisted(): Partial<Persisted> {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return {};
+    if (!raw) return loadLegacy();
     const parsed = JSON.parse(raw) as Partial<Persisted>;
     return {
       text: typeof parsed.text === "string" ? parsed.text : undefined,
       settings: parsed.settings ? { ...DEFAULT_SETTINGS, ...parsed.settings } : undefined,
-      source: parsed.source === "live" || parsed.source === "script" ? parsed.source : undefined,
-      live: parsed.live ? { ...DEFAULT_LIVE, ...parsed.live } : undefined,
     };
   } catch {
     return {};
   }
+}
+
+function loadLegacy(): Partial<Persisted> {
+  const raw = localStorage.getItem(LEGACY_KEY);
+  if (!raw) return {};
+  const parsed = JSON.parse(raw) as Partial<Persisted>;
+  const old = (parsed.settings ?? {}) as Partial<Settings>;
+  const settings: Settings = { ...DEFAULT_SETTINGS };
+  for (const k of CARRIED_OVER) if (old[k] !== undefined) (settings as unknown as Record<string, unknown>)[k] = old[k];
+  return { text: typeof parsed.text === "string" ? parsed.text : undefined, settings };
 }
 
 export function savePersisted(p: Persisted) {

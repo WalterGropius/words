@@ -1,67 +1,43 @@
 /**
- * Live speech → words, via Soniox real-time speech-to-text.
+ * Live speech-to-text from the microphone through Soniox's real-time API.
  *
- * The microphone is captured with an AudioWorklet as 16-bit PCM and streamed
- * over a WebSocket straight to Soniox, authenticated with a short-lived key
- * from our own /api/soniox route. Soniox answers with sub-word tokens; the
- * WordAssembler turns confirmed tokens into whole words for the stage.
+ * The mic is recorded as WebM/Opus and streamed to Soniox over a WebSocket
+ * ("auto" audio format). Two views of the transcript are offered:
+ *  - onWord: finalized words one at a time (stable, but Soniox may only
+ *    finalize at the end of a sentence);
+ *  - onSegment: the current sentence as heard so far, provisional words
+ *    included, so it can be shown live and corrected as Soniox revises it.
+ * If the connection drops mid-show it reconnects on its own with a fresh key.
  */
 
-import { TEXTS } from "./texts";
+const SONIOX_URL = "wss://stt-rt.soniox.com/transcribe-websocket";
+const MODEL = "stt-rt-v6";
+/** Soniox allows ~8,000 tokens of context; stay well under it. */
+const MAX_CONTEXT_CHARS = 6000;
+const CAPTION_CHARS = 220;
+/** A word still being spoken is shown once the next one starts, or after this much quiet. */
+const TRAILING_WORD_MS = 600;
 
-const SONIOX_WS_URL = "wss://stt-rt.soniox.com/transcribe-websocket";
-export const SONIOX_MODEL = "stt-rt-v6";
-/** Soniox context is capped at ~10,000 characters. */
-const CONTEXT_CHARS = 9000;
+export type VoiceStatus = "connecting" | "listening" | "muted" | "error" | "stopped";
 
-export interface LiveConfig {
-  /** ISO code used as a language hint, or "" to let Soniox detect it. */
+export interface VoiceOptions {
+  /** ISO code such as "en", or "" to let Soniox detect the language. */
   language: string;
-  /** Microphone deviceId, or "" for the system default. */
-  deviceId: string;
-  /** Hand the script to Soniox as context so its vocabulary is recognised. */
-  primeWithScript: boolean;
-}
-
-/** Tuned for a Czech-speaking stage: Czech recognition, restricted to Czech. */
-export const DEFAULT_LIVE: LiveConfig = { language: "cs", deviceId: "", primeWithScript: true };
-
-export const LANGUAGES: { code: string; label: string }[] = [
-  { code: "cs", label: "Čeština (Czech)" },
-  { code: "sk", label: "Slovenčina (Slovak)" },
-  { code: "en", label: "English" },
-  { code: "de", label: "German" },
-  { code: "fr", label: "French" },
-  { code: "es", label: "Spanish" },
-  { code: "it", label: "Italian" },
-  { code: "pt", label: "Portuguese" },
-  { code: "nl", label: "Dutch" },
-  { code: "pl", label: "Polish" },
-  { code: "sv", label: "Swedish" },
-  { code: "da", label: "Danish" },
-  { code: "no", label: "Norwegian" },
-  { code: "ru", label: "Russian" },
-  { code: "uk", label: "Ukrainian" },
-  { code: "", label: "Detect automatically" },
-];
-
-/**
- * The script as recognition context. The built-in presets are English
- * Shakespeare; they would only mislead a Czech recogniser, so they are sent
- * only when the spoken language is English (or left to detection).
- */
-export function scriptContext(script: string, config: LiveConfig): string {
-  if (!config.primeWithScript) return "";
-  const isPreset = TEXTS.some((t) => t.text.trim() === script.trim());
-  if (isPreset && config.language !== "en" && config.language !== "") return "";
-  return script;
-}
-
-export type LiveState = "idle" | "connecting" | "listening" | "reconnecting" | "error";
-
-export interface LiveStatus {
-  state: LiveState;
-  message?: string;
+  /** Background text (e.g. the script) that biases recognition toward its vocabulary. */
+  context?: string;
+  /** Comma-separated words never handed out (the caption still shows them). */
+  banned?: string;
+  onWord?: (word: string) => void;
+  /**
+   * The current segment's words so far (final and provisional). Earlier
+   * entries can change between calls; `done` means the segment is final.
+   */
+  onSegment?: (words: string[], done: boolean) => void;
+  /** The speaker paused: Soniox closed a segment. */
+  onPause?: () => void;
+  /** Recent transcript for the operator: settled text plus the still-changing tail. */
+  onCaption?: (settled: string, pending: string) => void;
+  onStatus?: (status: VoiceStatus, detail?: string) => void;
 }
 
 interface SonioxToken {
@@ -69,7 +45,7 @@ interface SonioxToken {
   is_final: boolean;
 }
 
-interface SonioxResponse {
+interface SonioxMessage {
   tokens?: SonioxToken[];
   finished?: boolean;
   error_code?: number;
@@ -77,349 +53,297 @@ interface SonioxResponse {
   error_message?: string;
 }
 
-// ───────────────────────────── tokens → words ─────────────────────────────
+/** Errors that a reconnect won't fix. */
+const FATAL_ERRORS = new Set(["unauthenticated", "invalid_request", "forbidden", "payment_required"]);
 
-export interface WordBatch {
-  words: string[];
-  /** The speaker paused (Soniox endpoint): a natural line break after these words. */
-  pause: boolean;
+function pickMimeType(): string | null {
+  if (typeof MediaRecorder === "undefined") return null;
+  const candidates = ["audio/webm;codecs=opus", "audio/webm", "audio/ogg;codecs=opus"];
+  return candidates.find((t) => MediaRecorder.isTypeSupported(t)) ?? null;
 }
 
-/**
- * Soniox sends sub-word tokens ("do", "ing", "?") and separate spaces. Final
- * tokens arrive once and never change; non-final ones are a provisional tail
- * that is re-sent with every response. A word is ready for the stage once it
- * is confirmed and something after it shows it has ended: a space, or the
- * end of an utterance.
- */
-export class WordAssembler {
-  private pending = "";
-
-  feed(tokens: SonioxToken[]): WordBatch & { provisional: string } {
-    let pause = false;
-    let tail = "";
-    for (const t of tokens) {
-      if (t.text === "<end>" || t.text === "<fin>") {
-        if (t.is_final) pause = true;
-        continue;
-      }
-      if (t.is_final) this.pending += t.text.normalize("NFC");
-      else tail += t.text.normalize("NFC");
-    }
-
-    const words: string[] = [];
-    const cut = this.pending.search(/\s\S*$/);
-    if (cut >= 0) {
-      words.push(...this.pending.slice(0, cut).split(/\s+/).filter(Boolean));
-      this.pending = this.pending.slice(cut).trimStart();
-    }
-    // the word is over if the speaker paused, or the provisional tail starts a new one
-    if (this.pending && (pause || /^\s/.test(tail))) words.push(...this.flush());
-    return { words, pause, provisional: `${this.pending}${tail}`.trim() };
-  }
-
-  get hasPending() {
-    return this.pending.trim().length > 0;
-  }
-
-  flush(): string[] {
-    const w = this.pending.trim().split(/\s+/).filter(Boolean);
-    this.pending = "";
-    return w;
-  }
+async function fetchKey(): Promise<string> {
+  const res = await fetch("/api/soniox-key", { method: "POST" });
+  const body = (await res.json().catch(() => ({}))) as { apiKey?: string; error?: string };
+  if (!res.ok || !body.apiKey) throw new FatalError(body.error ?? `Key request failed (${res.status})`);
+  return body.apiKey;
 }
 
-// ───────────────────────────── microphone ─────────────────────────────
+class FatalError extends Error {}
 
-/** Runs on the audio thread: float samples → ~100 ms chunks of 16-bit PCM. */
-const WORKLET = `
-class SonioxTap extends AudioWorkletProcessor {
-  constructor() {
-    super();
-    this.size = Math.round(sampleRate / 10);
-    this.buf = new Int16Array(this.size);
-    this.n = 0;
-    this.peak = 0;
-  }
-  process(inputs) {
-    const ch = inputs[0] && inputs[0][0];
-    if (!ch) return true;
-    for (let i = 0; i < ch.length; i++) {
-      const v = Math.max(-1, Math.min(1, ch[i]));
-      const a = v < 0 ? -v : v;
-      if (a > this.peak) this.peak = a;
-      this.buf[this.n++] = v < 0 ? v * 0x8000 : v * 0x7fff;
-      if (this.n === this.size) {
-        this.port.postMessage({ pcm: this.buf.buffer, peak: this.peak }, [this.buf.buffer]);
-        this.buf = new Int16Array(this.size);
-        this.n = 0;
-        this.peak = 0;
-      }
-    }
-    return true;
-  }
-}
-registerProcessor("soniox-tap", SonioxTap);
-`;
+const splitWords = (text: string) => text.split(/\s+/).filter(Boolean);
 
-export async function listMicrophones(): Promise<MediaDeviceInfo[]> {
-  if (!navigator.mediaDevices?.enumerateDevices) return [];
-  const all = await navigator.mediaDevices.enumerateDevices();
-  return all.filter((d) => d.kind === "audioinput");
+/** Compare words loosely: case, punctuation and drawn-out letters don't matter ("Hmmm," → "hm"). */
+function wordKey(word: string): string {
+  return word
+    .toLocaleLowerCase()
+    .normalize("NFC")
+    .replace(/[^\p{L}\p{N}]/gu, "")
+    .replace(/(\p{L})\1+/gu, "$1");
 }
 
-/** Ask for microphone permission once so device names become visible. */
-export async function unlockMicrophoneNames() {
-  const s = await navigator.mediaDevices.getUserMedia({ audio: true });
-  s.getTracks().forEach((t) => t.stop());
+/** A test for words that should never reach the stage: the banned list, and bare punctuation. */
+export function bannedFilter(list: string): (word: string) => boolean {
+  const keys = new Set(list.split(/[\s,;]+/).map(wordKey).filter(Boolean));
+  return (word) => {
+    const k = wordKey(word);
+    return k === "" || keys.has(k);
+  };
 }
 
-export async function sonioxConfigured(): Promise<boolean> {
-  try {
-    const r = await fetch("/api/soniox", { cache: "no-store" });
-    if (!r.ok) return false;
-    return Boolean(((await r.json()) as { configured?: boolean }).configured);
-  } catch {
-    return false;
-  }
-}
-
-// ───────────────────────────── the session ─────────────────────────────
-
-export interface LiveCallbacks {
-  onWords: (batch: WordBatch) => void;
-  onStatus?: (s: LiveStatus) => void;
-  /** Confirmed-but-unfinished + provisional text: what's being said right now. */
-  onProvisional?: (text: string) => void;
-  /** Input peak level 0..1, about ten times a second. */
-  onLevel?: (peak: number) => void;
-}
-
-/** Errors that a fresh connection will not fix. */
-const FATAL = new Set([400, 401, 402]);
-
-export class LiveTranscriber {
-  private readonly config: LiveConfig;
-  private readonly context: string;
-  private readonly cb: LiveCallbacks;
-  private readonly words = new WordAssembler();
-
+export class VoiceListener {
+  private readonly opts: VoiceOptions;
+  private readonly isBanned: (word: string) => boolean;
   private stream: MediaStream | null = null;
-  private audio: AudioContext | null = null;
   private ws: WebSocket | null = null;
-  private wsReady = false;
-  private stopped = false;
-  private retries = 0;
+  private recorder: MediaRecorder | null = null;
+  private keepalive: ReturnType<typeof setInterval> | null = null;
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
-  private idleTimer: ReturnType<typeof setTimeout> | null = null;
-  private status: LiveStatus = { state: "idle" };
+  private retries = 0;
+  private stopped = false;
+  private muted = false;
 
-  /** `context` is the text to prime recognition with; see scriptContext(). */
-  constructor(config: LiveConfig, callbacks: LiveCallbacks, context = "") {
-    this.config = config;
-    this.cb = callbacks;
-    this.context = context.trim().slice(0, CONTEXT_CHARS);
-  }
+  private partial = "";
+  private settled = "";
+  /** Final text of the current segment (since the last endpoint). */
+  private segmentFinal = "";
+  private hypothesis = "";
+  private trailingTimer: ReturnType<typeof setTimeout> | null = null;
 
-  get state() {
-    return this.status;
+  constructor(opts: VoiceOptions) {
+    this.opts = opts;
+    this.isBanned = bannedFilter(opts.banned ?? "");
   }
 
   async start() {
-    this.stopped = false;
-    this.setStatus({ state: "connecting", message: "Opening the microphone…" });
-    try {
-      await this.openMicrophone();
-    } catch (err) {
-      this.stop();
-      this.setStatus({ state: "error", message: micError(err) });
+    this.status("connecting");
+    const mimeType = pickMimeType();
+    if (!mimeType) {
+      this.fail("This browser can't stream audio in a format Soniox accepts. Use Chrome, Edge or Firefox.");
       return;
     }
-    if (this.stopped) return;
-    void this.connect();
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+      });
+      if (this.stopped) {
+        stream.getTracks().forEach((t) => t.stop());
+        return;
+      }
+      this.stream = stream;
+    } catch (err) {
+      const name = (err as DOMException).name;
+      this.fail(
+        name === "NotAllowedError"
+          ? "Microphone access was blocked. Allow it in the browser's address bar and try again."
+          : name === "NotFoundError"
+            ? "No microphone found."
+            : `Could not open the microphone: ${(err as Error).message}`,
+      );
+      return;
+    }
+    await this.connect(mimeType);
+  }
+
+  /** Stop sending audio without dropping the connection (for banter between readings). */
+  setMuted(muted: boolean) {
+    if (this.muted === muted || this.stopped) return;
+    this.muted = muted;
+    if (muted) {
+      // the finalize below closes the segment with a <fin>
+      if (this.recorder?.state === "recording") this.recorder.pause();
+      this.send(JSON.stringify({ type: "finalize" }));
+    } else if (this.recorder?.state === "paused") {
+      this.recorder.resume();
+    }
+    if (this.ws?.readyState === WebSocket.OPEN) this.status(muted ? "muted" : "listening");
+  }
+
+  get isMuted() {
+    return this.muted;
   }
 
   stop() {
-    if (this.stopped) return;
+    if (this.shutdown()) this.status("stopped");
+  }
+
+  private shutdown(): boolean {
+    if (this.stopped) return false;
     this.stopped = true;
     if (this.retryTimer) clearTimeout(this.retryTimer);
-    if (this.idleTimer) clearTimeout(this.idleTimer);
-    const ws = this.ws;
-    this.ws = null;
-    this.wsReady = false;
-    if (ws) {
-      try {
-        // an empty frame tells Soniox the audio is over
-        if (ws.readyState === WebSocket.OPEN) ws.send("");
-      } catch {
-        /* closing anyway */
-      }
-      setTimeout(() => ws.close(), 300);
-    }
+    this.teardownConnection(true);
     this.stream?.getTracks().forEach((t) => t.stop());
     this.stream = null;
-    void this.audio?.close().catch(() => {});
-    this.audio = null;
-    this.setStatus({ state: "idle" });
+    return true;
   }
 
-  private setStatus(s: LiveStatus) {
-    this.status = s;
-    this.cb.onStatus?.(s);
-  }
+  // ───────────────────────────── connection ─────────────────────────────
 
-  private async openMicrophone() {
-    if (!navigator.mediaDevices?.getUserMedia) throw new Error("insecure");
-    const constraints: MediaTrackConstraints = {
-      channelCount: 1,
-      // a stage mic is not a phone call: no echo cancelling that eats the voice
-      echoCancellation: false,
-      noiseSuppression: true,
-      autoGainControl: true,
-    };
-    if (this.config.deviceId) constraints.deviceId = { exact: this.config.deviceId };
-    this.stream = await navigator.mediaDevices.getUserMedia({ audio: constraints });
-
-    const ctx = new AudioContext();
-    this.audio = ctx;
-    const url = URL.createObjectURL(new Blob([WORKLET], { type: "application/javascript" }));
-    try {
-      await ctx.audioWorklet.addModule(url);
-    } finally {
-      URL.revokeObjectURL(url);
-    }
-    const source = ctx.createMediaStreamSource(this.stream);
-    const tap = new AudioWorkletNode(ctx, "soniox-tap", { numberOfInputs: 1, numberOfOutputs: 1, channelCount: 1, channelCountMode: "explicit" });
-    const mute = ctx.createGain();
-    mute.gain.value = 0;
-    source.connect(tap).connect(mute).connect(ctx.destination);
-    tap.port.onmessage = (e: MessageEvent<{ pcm: ArrayBuffer; peak: number }>) => {
-      this.cb.onLevel?.(e.data.peak);
-      if (this.wsReady && this.ws?.readyState === WebSocket.OPEN) this.ws.send(e.data.pcm);
-    };
-    if (ctx.state === "suspended") await ctx.resume().catch(() => {});
-  }
-
-  private async connect() {
-    if (this.stopped || !this.audio) return;
-    this.setStatus({ state: this.retries ? "reconnecting" : "connecting", message: this.retries ? "Reconnecting to Soniox…" : "Connecting to Soniox…" });
-
+  private async connect(mimeType: string) {
     let key: string;
     try {
-      const r = await fetch("/api/soniox", { method: "POST", cache: "no-store" });
-      const data = (await r.json().catch(() => ({}))) as { api_key?: string; error?: string };
-      if (!r.ok || !data.api_key) {
-        const fatal = r.status === 503 || r.status === 403;
-        this.fail(data.error ?? `Could not get a Soniox key (${r.status}).`, fatal);
-        return;
-      }
-      key = data.api_key;
-    } catch {
-      this.fail("Could not reach the server for a Soniox key.", false);
+      key = await fetchKey();
+    } catch (err) {
+      if (err instanceof FatalError) this.fail(err.message);
+      else this.scheduleRetry(mimeType, (err as Error).message);
       return;
     }
-    if (this.stopped) return;
+    if (this.stopped || !this.stream) return;
 
-    const ws = new WebSocket(SONIOX_WS_URL, ["soniox-api-key", key]);
-    ws.binaryType = "arraybuffer";
+    const ws = new WebSocket(SONIOX_URL, ["soniox-api-key", key]);
     this.ws = ws;
     let fatal = false;
 
     ws.onopen = () => {
-      if (ws !== this.ws) return;
-      const start: Record<string, unknown> = {
-        model: SONIOX_MODEL,
-        audio_format: "pcm_s16le",
-        sample_rate: this.audio?.sampleRate ?? 48000,
-        num_channels: 1,
-        enable_endpoint_detection: true,
+      if (this.stopped || !this.stream) return;
+      const context = this.opts.context?.trim().slice(0, MAX_CONTEXT_CHARS);
+      ws.send(
+        JSON.stringify({
+          model: MODEL,
+          audio_format: "auto",
+          language_hints: this.opts.language ? [this.opts.language] : undefined,
+          enable_endpoint_detection: true,
+          context: context ? { text: context } : undefined,
+        }),
+      );
+      const recorder = new MediaRecorder(this.stream!, { mimeType });
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0 && ws.readyState === WebSocket.OPEN) ws.send(e.data);
       };
-      if (this.config.language) {
-        // one known language: restrict to it, so Czech never comes out as Slovak or Polish
-        start.language_hints = [this.config.language];
-        start.language_hints_strict = true;
-      }
-      if (this.context) start.context = { text: this.context };
-      ws.send(JSON.stringify(start));
-      this.wsReady = true;
-      this.retries = 0;
-      this.setStatus({ state: "listening" });
+      recorder.start(100);
+      if (this.muted) recorder.pause();
+      this.recorder = recorder;
+      // only matters while muted: Soniox ends a stream after 20s without data
+      this.keepalive = setInterval(() => {
+        if (this.muted) this.send(JSON.stringify({ type: "keepalive" }));
+      }, 10_000);
+      this.status(this.muted ? "muted" : "listening");
     };
 
-    ws.onmessage = (e: MessageEvent) => {
-      if (ws !== this.ws || typeof e.data !== "string") return;
-      let res: SonioxResponse;
+    ws.onmessage = (e) => {
+      let msg: SonioxMessage;
       try {
-        res = JSON.parse(e.data) as SonioxResponse;
+        msg = JSON.parse(e.data as string) as SonioxMessage;
       } catch {
         return;
       }
-      if (res.error_code) {
-        fatal = FATAL.has(res.error_code) || (res.error_code === 403 && res.error_type !== "temp_api_key_session_expired");
-        this.setStatus({ state: "error", message: `Soniox: ${res.error_message ?? res.error_type ?? res.error_code}` });
+      if (msg.error_code) {
+        fatal = FATAL_ERRORS.has(msg.error_type ?? "");
+        const detail = `Soniox: ${msg.error_message ?? msg.error_type ?? msg.error_code}`;
+        if (fatal) this.fail(detail);
+        else this.status("connecting", detail);
         return;
       }
-      if (res.tokens?.length) this.handleTokens(res.tokens);
+      if (msg.tokens?.length) {
+        this.retries = 0;
+        this.onTokens(msg.tokens);
+      }
     };
 
     ws.onclose = () => {
-      if (ws !== this.ws) return;
-      this.wsReady = false;
-      this.ws = null;
-      this.release(this.words.flush(), true);
-      if (this.stopped) return;
-      if (fatal) {
-        this.fail(this.status.message ?? "Soniox closed the connection.", true);
-        return;
-      }
-      this.scheduleReconnect();
+      if (this.ws !== ws) return;
+      this.teardownConnection(false);
+      if (!this.stopped && !fatal) this.scheduleRetry(mimeType, "Connection lost, reconnecting…");
     };
   }
 
-  private handleTokens(tokens: SonioxToken[]) {
-    const { words, pause, provisional } = this.words.feed(tokens);
-    this.release(words, pause);
-    this.cb.onProvisional?.(provisional);
-
-    // fallback for a trailing word that never gets a space or an endpoint
-    if (this.idleTimer) clearTimeout(this.idleTimer);
-    if (this.words.hasPending) {
-      this.idleTimer = setTimeout(() => {
-        this.release(this.words.flush(), true);
-        this.cb.onProvisional?.("");
-      }, 1400);
-    }
-  }
-
-  private release(words: string[], pause: boolean) {
-    if (words.length || pause) this.cb.onWords({ words, pause });
-  }
-
-  private fail(message: string, fatal: boolean) {
-    if (fatal || this.stopped) {
-      this.stop(); // release the microphone too
-      this.setStatus({ state: "error", message });
-      return;
-    }
-    this.setStatus({ state: "reconnecting", message });
-    this.scheduleReconnect();
-  }
-
-  private scheduleReconnect() {
+  private scheduleRetry(mimeType: string, detail: string) {
     if (this.stopped) return;
-    this.retries++;
-    const wait = Math.min(10_000, 600 * 2 ** Math.min(this.retries - 1, 4));
-    this.setStatus({ state: "reconnecting", message: this.status.message ?? "Reconnecting to Soniox…" });
-    if (this.retryTimer) clearTimeout(this.retryTimer);
-    this.retryTimer = setTimeout(() => void this.connect(), wait);
+    this.status("connecting", detail);
+    const delay = Math.min(10_000, 800 * 2 ** this.retries++);
+    this.retryTimer = setTimeout(() => void this.connect(mimeType), delay);
   }
-}
 
-function micError(err: unknown): string {
-  const name = (err as { name?: string })?.name;
-  if ((err as Error)?.message === "insecure") return "The microphone needs a secure page (https or localhost).";
-  if (name === "NotAllowedError" || name === "SecurityError") return "Microphone access was blocked. Allow it in the browser and try again.";
-  if (name === "NotFoundError" || name === "OverconstrainedError") return "That microphone was not found. Pick another one in setup.";
-  if (name === "NotReadableError") return "The microphone is busy in another app.";
-  return "Could not open the microphone.";
+  private teardownConnection(graceful: boolean) {
+    if (this.keepalive) clearInterval(this.keepalive);
+    this.keepalive = null;
+    if (this.recorder && this.recorder.state !== "inactive") this.recorder.stop();
+    this.recorder = null;
+    const ws = this.ws;
+    this.ws = null;
+    if (!ws) return;
+    ws.onclose = null;
+    if (graceful && ws.readyState === WebSocket.OPEN) {
+      // an empty text frame asks Soniox to finish the stream cleanly
+      ws.send("");
+      setTimeout(() => ws.close(), 1500);
+    } else {
+      ws.close();
+    }
+    this.flushPartial();
+    this.endSegment();
+  }
+
+  private send(data: string) {
+    if (this.ws?.readyState === WebSocket.OPEN) this.ws.send(data);
+  }
+
+  // ───────────────────────────── transcript ─────────────────────────────
+
+  private onTokens(tokens: SonioxToken[]) {
+    let pending = "";
+    for (const t of tokens) {
+      if (!t.is_final) {
+        if (!t.text.startsWith("<")) pending += t.text;
+        continue;
+      }
+      if (t.text === "<end>" || t.text === "<fin>") {
+        this.flushPartial();
+        this.endSegment();
+        this.opts.onPause?.();
+        continue;
+      }
+      this.settled = (this.settled + t.text).slice(-CAPTION_CHARS);
+      this.segmentFinal += t.text;
+      // final text arrives in pieces ("Hel", "lo", " ", "world"): a word is done at whitespace
+      const parts = (this.partial + t.text).split(/\s+/);
+      this.partial = parts.pop() ?? "";
+      for (const w of parts) if (w && !this.isBanned(w)) this.opts.onWord?.(w);
+    }
+    this.opts.onCaption?.(this.settled, pending);
+    this.updateHypothesis(this.segmentFinal + pending);
+  }
+
+  private updateHypothesis(text: string) {
+    if (text === this.hypothesis) return;
+    this.hypothesis = text;
+    if (this.trailingTimer) clearTimeout(this.trailingTimer);
+    this.trailingTimer = null;
+    if (!this.opts.onSegment) return;
+    // hold back a word that may still be growing ("otáz" → "otázka") until it's clearly over
+    const words = splitWords(text);
+    if (words.length && !/\s$/.test(text)) {
+      words.pop();
+      this.trailingTimer = setTimeout(() => this.opts.onSegment?.(this.shown(splitWords(this.hypothesis)), false), TRAILING_WORD_MS);
+    }
+    this.opts.onSegment(this.shown(words), false);
+  }
+
+  private endSegment() {
+    if (this.trailingTimer) clearTimeout(this.trailingTimer);
+    this.trailingTimer = null;
+    const words = splitWords(this.segmentFinal);
+    this.segmentFinal = "";
+    this.hypothesis = "";
+    this.opts.onSegment?.(this.shown(words), true);
+  }
+
+  private shown(words: string[]) {
+    return words.filter((w) => !this.isBanned(w));
+  }
+
+  private flushPartial() {
+    const w = this.partial.trim();
+    this.partial = "";
+    if (w && !this.isBanned(w)) this.opts.onWord?.(w);
+  }
+
+  private status(s: VoiceStatus, detail?: string) {
+    this.opts.onStatus?.(s, detail);
+  }
+
+  private fail(detail: string) {
+    this.shutdown();
+    this.status("error", detail);
+  }
 }

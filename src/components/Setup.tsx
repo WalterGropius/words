@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { FONTS } from "@/lib/fonts";
 import {
+  DEFAULT_BANNED,
   DEFAULT_SETTINGS,
   LOOKS,
   MODE_DEFAULTS,
@@ -12,9 +13,8 @@ import {
   type Settings,
   type Source,
 } from "@/lib/settings";
-import { sonioxConfigured, type LiveConfig } from "@/lib/soniox";
+import { VoiceListener, type VoiceStatus } from "@/lib/soniox";
 import { TEXTS } from "@/lib/texts";
-import LivePanel from "./LivePanel";
 import Preview from "./Preview";
 
 interface Props {
@@ -22,25 +22,33 @@ interface Props {
   onText: (t: string) => void;
   settings: Settings;
   onSettings: (s: Settings) => void;
-  source: Source;
-  onSource: (s: Source) => void;
-  live: LiveConfig;
-  onLive: (c: LiveConfig) => void;
   onPlay: () => void;
 }
-
-/** What the rehearsal performs while live speech is selected. */
-const LIVE_SAMPLE = `Slova, slova, slova.
-Každé vyslovené slovo vystoupí ze tmy,
-jakmile zazní.`;
 
 const MODES: { value: Mode; label: string; blurb: string }[] = [
   { value: "word", label: "Word", blurb: "One word at a time, centre stage. Each press sends the last one away." },
   { value: "line", label: "Line", blurb: "Words light up in place along the verse line; the line departs when done." },
   { value: "page", label: "Page", blurb: "The whole passage waits in shadow and is revealed word by word." },
+  {
+    value: "paragraph",
+    label: "Paragraph",
+    blurb: "Words gather into a paragraph somewhere on the stage; the next begins elsewhere as the last one leaves.",
+  },
+];
+
+const SOURCES: { value: Source; label: string }[] = [
+  { value: "script", label: "Script" },
+  { value: "voice", label: "Voice (Soniox)" },
+];
+
+const LANGUAGES: { value: string; label: string }[] = [
+  { value: "cs", label: "Čeština" },
+  { value: "en", label: "English" },
+  { value: "", label: "Detect" },
 ];
 
 const ENTRANCES: { value: Entrance; label: string }[] = [
+  { value: "nebula", label: "Nebula" },
   { value: "fade", label: "Ink" },
   { value: "quill", label: "Quill" },
   { value: "rise", label: "Rise" },
@@ -49,6 +57,7 @@ const ENTRANCES: { value: Entrance; label: string }[] = [
 ];
 
 const EXITS: { value: Exit; label: string }[] = [
+  { value: "smoke", label: "Smoke" },
   { value: "fall", label: "Fall" },
   { value: "rise", label: "Ascend" },
   { value: "drift", label: "Recede" },
@@ -58,6 +67,7 @@ const EXITS: { value: Exit; label: string }[] = [
 ];
 
 const ENTRANCE_NOTES: Record<Entrance, string> = {
+  nebula: "Condenses out of a soft cosmic cloud, like smoke gathering into letters.",
   fade: "Bleeds in from soft focus, like wet ink.",
   quill: "Written left to right with a glowing nib.",
   rise: "Lifts gently into place.",
@@ -66,6 +76,7 @@ const ENTRANCE_NOTES: Record<Entrance, string> = {
 };
 
 const EXIT_NOTES: Record<Exit, string> = {
+  smoke: "Thins into smoke that a draft carries off, curling and spreading until it's gone.",
   fall: "Letters loosen and drift down under a gentle gravity.",
   rise: "Letters float upward like embers and smoke.",
   drift: "The word sinks back into the darkness, out of focus.",
@@ -74,7 +85,7 @@ const EXIT_NOTES: Record<Exit, string> = {
   fade: "Simply fades.",
 };
 
-export default function Setup({ text, onText, settings, onSettings, source, onSource, live, onLive, onPlay }: Props) {
+export default function Setup({ text, onText, settings, onSettings, onPlay }: Props) {
   const set = <K extends keyof Settings>(key: K, value: Settings[K]) => onSettings({ ...settings, [key]: value });
   const s = settings;
 
@@ -88,12 +99,12 @@ export default function Setup({ text, onText, settings, onSettings, source, onSo
   const activePreset = TEXTS.find((t) => t.text.trim() === text.trim())?.id;
   const activeLook = LOOKS.find((l) => Object.entries(l.settings).every(([k, v]) => s[k as keyof Settings] === v))?.id;
   const font = FONTS.find((f) => f.id === s.font) ?? FONTS[0];
-  const isLive = source === "live";
+  const voice = s.source === "voice";
+  const needsCzech = (voice && s.language === "cs") || /[ěščřžťďňůĚŠČŘŽŤĎŇŮ]/.test(text);
 
-  const [configured, setConfigured] = useState<boolean | null>(null);
-  useEffect(() => {
-    if (isLive && configured === null) void sonioxConfigured().then(setConfigured);
-  }, [isLive, configured]);
+  // the Fell types have no Czech letters: move to one that does when Czech is chosen
+  const setSource = (source: Source) =>
+    onSettings({ ...settings, source, ...(source === "voice" && s.language === "cs" && !font.czech ? { font: "garamond" as const } : {}) });
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -106,7 +117,7 @@ export default function Setup({ text, onText, settings, onSettings, source, onSo
     return () => window.removeEventListener("keydown", onKey);
   }, [onPlay]);
 
-  const canPlay = isLive ? configured !== false : stats.words > 0;
+  const canPlay = voice || stats.words > 0;
 
   return (
     <main className="setup">
@@ -120,8 +131,8 @@ export default function Setup({ text, onText, settings, onSettings, source, onSo
           </p>
         </div>
         <p className="setup__intro">
-          {isLive ? (
-            <>Set the stage, raise the curtain, and speak: each word appears as it is said.</>
+          {voice ? (
+            <>Set the stage, raise the curtain, and speak. Each word appears as you say it.</>
           ) : (
             <>
               Paste a text, set the stage, raise the curtain. Then press <kbd>Space</kbd> as each word is spoken.
@@ -136,27 +147,46 @@ export default function Setup({ text, onText, settings, onSettings, source, onSo
           <h2 className="act">
             <span className="act__num">I.</span> The Text
           </h2>
-          <div className="source">
-            <Segmented
-              value={source}
-              options={[
-                { value: "script", label: "Script" },
-                { value: "live", label: "Live speech" },
-              ]}
-              onChange={onSource}
-            />
-          </div>
-          {isLive ? (
-            <LivePanel
-              live={live}
-              onLive={onLive}
-              configured={configured}
-              script={text}
-              fontFamily={font.family}
-              fontStyle={s.italic && font.hasItalic ? "italic" : "normal"}
-            />
-          ) : (
-          <>
+          <Segmented value={s.source} options={SOURCES} onChange={setSource} />
+          {voice && (
+            <div className="voice">
+              <div className="row">
+                <span className="voice__label">Language</span>
+                <Segmented value={s.language} options={LANGUAGES} onChange={(v) => set("language", v)} />
+              </div>
+              <Toggle label="Live transcript" value={s.liveTranscript} onChange={(v) => set("liveTranscript", v)} />
+              <p className="note">
+                {s.liveTranscript
+                  ? "Words appear the moment they're heard and run on as sentences across the stage. If Soniox changes its mind about a word, it's quietly rewritten."
+                  : "Words appear only once Soniox is sure of them, often at the end of a sentence, and follow the Mode below."}
+              </p>
+              <label className="voice__field">
+                <span className="voice__label">Never show these words</span>
+                <textarea
+                  className="voice__banned"
+                  rows={2}
+                  value={s.banned}
+                  onChange={(e) => set("banned", e.target.value)}
+                  spellCheck={false}
+                  placeholder="hm, ehm, eh, uh…"
+                />
+              </label>
+              <p className="note">
+                Hesitations and fillers, separated by commas. Drawn-out spellings count too: <em>hm</em> also catches <em>hmmm</em>,{" "}
+                <em>eh</em> catches <em>ehhh</em>. The transcript at the bottom still shows them.{" "}
+                {s.banned !== DEFAULT_BANNED && (
+                  <button className="voice__link" onClick={() => set("banned", DEFAULT_BANNED)}>
+                    Restore the Czech defaults
+                  </button>
+                )}
+              </p>
+              <MicTest language={s.language} context={text} />
+              <p className="note">
+                Words appear on stage as Soniox recognises them. The text below is sent along as a vocabulary hint, so names and
+                old words are heard correctly. On stage, <kbd>M</kbd> mutes the mic.
+              </p>
+            </div>
+          )}
           <div className="chips">
             {TEXTS.map((t) => (
               <button key={t.id} className={`chip ${activePreset === t.id ? "is-active" : ""}`} onClick={() => onText(t.text)}>
@@ -175,10 +205,14 @@ export default function Setup({ text, onText, settings, onSettings, source, onSo
             />
           </div>
           <p className="meta">
-            {stats.lines} lines &nbsp;·&nbsp; {stats.words} words &nbsp;·&nbsp; about {stats.time} spoken
+            {voice ? (
+              <>Vocabulary hint &nbsp;·&nbsp; {stats.words} words</>
+            ) : (
+              <>
+                {stats.lines} lines &nbsp;·&nbsp; {stats.words} words &nbsp;·&nbsp; about {stats.time} spoken
+              </>
+            )}
           </p>
-          </>
-          )}
         </section>
 
         {/* ─────────────── II. The staging ─────────────── */}
@@ -189,7 +223,7 @@ export default function Setup({ text, onText, settings, onSettings, source, onSo
 
           <div className="preview-dock">
             <div className="preview">
-              <Preview text={isLive ? LIVE_SAMPLE : text} settings={settings} />
+              <Preview text={text} settings={settings} />
               <span className="preview__label">Rehearsal</span>
               <i className="corner corner--tl" />
               <i className="corner corner--tr" />
@@ -245,12 +279,30 @@ export default function Setup({ text, onText, settings, onSettings, source, onSo
             {s.mode === "page" && (
               <Slider label="Max lines per page" value={s.maxPageLines} min={4} max={24} step={1} onChange={(v) => set("maxPageLines", v)} format={(v) => `${v}`} />
             )}
-            {s.mode !== "word" && isLive && (
-              <p className="note">With live speech the lines are set left to right as they are spoken, and a pause starts a new line.</p>
-            )}
-            {s.mode !== "word" && (
+            {s.mode === "paragraph" && (
               <>
-                {!isLive && <Slider label="Unspoken words" value={s.ghost} min={0} max={0.45} step={0.01} onChange={(v) => set("ghost", v)} format={(v) => (v === 0 ? "hidden" : pct(v))} />}
+                <Slider label="Lines per paragraph" value={s.paragraphLines} min={2} max={10} step={1} onChange={(v) => set("paragraphLines", v)} format={(v) => `${v}`} />
+                <Slider label="Paragraph width" value={s.paragraphWidth} min={0.25} max={0.7} step={0.01} onChange={(v) => set("paragraphWidth", v)} format={pct} />
+                <Slider label="Each word stays readable for" value={s.paragraphLinger} min={0.25} max={20} step={0.25} onChange={(v) => set("paragraphLinger", v)} format={secs} />
+                <Slider label="Then leaves over" value={s.paragraphFade} min={0.3} max={6} step={0.1} onChange={(v) => set("paragraphFade", v)} format={secs} />
+                <Slider label="Spoken words" value={s.spokenLevel} min={0.1} max={1} step={0.01} onChange={(v) => set("spokenLevel", v)} format={pct} />
+                <div className="row">
+                  {voice ? (
+                    <Toggle label="New paragraph after a pause" value={s.paragraphOnPause} onChange={(v) => set("paragraphOnPause", v)} />
+                  ) : (
+                    <Toggle label="New paragraph at stanza" value={s.stanzaBreaks} onChange={(v) => set("stanzaBreaks", v)} />
+                  )}
+                </div>
+                <p className="note">
+                  Each word forms with the entrance effect, stays readable for a set time, then leaves with the exit effect below,
+                  so the paragraph clears away as it is being written. A new paragraph begins elsewhere when this one is full
+                  {voice ? ", or at a pause once it has a few words" : ""}.
+                </p>
+              </>
+            )}
+            {(s.mode === "line" || s.mode === "page") && (
+              <>
+                <Slider label="Unspoken words" value={s.ghost} min={0} max={0.45} step={0.01} onChange={(v) => set("ghost", v)} format={(v) => (v === 0 ? "hidden" : pct(v))} />
                 <Slider label="Spoken words" value={s.spokenLevel} min={0.1} max={1} step={0.01} onChange={(v) => set("spokenLevel", v)} format={pct} />
                 <div className="row">
                   <Segmented
@@ -270,7 +322,12 @@ export default function Setup({ text, onText, settings, onSettings, source, onSo
           <Group title="Typeface">
             <div className="fonts">
               {FONTS.map((f) => (
-                <button key={f.id} className={`font ${s.font === f.id ? "is-active" : ""}`} onClick={() => set("font", f.id)}>
+                <button
+                  key={f.id}
+                  className={`font ${s.font === f.id ? "is-active" : ""} ${needsCzech && !f.czech ? "is-lacking" : ""}`}
+                  onClick={() => set("font", f.id)}
+                  title={needsCzech && !f.czech ? "No Czech letters (ř, ě, ů…): they would show in a fallback face" : undefined}
+                >
                   <span className="font__sample" style={{ fontFamily: f.family }}>
                     {f.id === "cinzel" ? "Thou Art" : "Thou art"}
                   </span>
@@ -278,13 +335,15 @@ export default function Setup({ text, onText, settings, onSettings, source, onSo
                 </button>
               ))}
             </div>
+            {needsCzech && !font.czech && (
+              <p className="note note--warn">{font.label} has no Czech letters (ř, ě, ů…). Choose Cormorant, EB Garamond, Cinzel or one of the sans serifs.</p>
+            )}
             <Slider label="Size" value={s.size} min={0.4} max={2} step={0.05} onChange={(v) => set("size", v)} format={(v) => `${Math.round(v * 100)}%`} />
             <div className="row">
               <Toggle label="Italic" value={s.italic && font.hasItalic} disabled={!font.hasItalic} onChange={(v) => set("italic", v)} />
               <Toggle label="Capitals" value={s.caps} onChange={(v) => set("caps", v)} />
               <Toggle label="Long ſ (Folio spelling)" value={s.longS} onChange={(v) => set("longS", v)} />
             </div>
-            {!font.czech && <p className="note">This face has no Czech accents of its own; letters like ř, ě and ů are borrowed from EB Garamond.</p>}
           </Group>
 
           <Group title="Entrance">
@@ -307,6 +366,14 @@ export default function Setup({ text, onText, settings, onSettings, source, onSo
             <Slider label="Turbulence" value={s.turbulence} min={0} max={1} step={0.05} onChange={(v) => set("turbulence", v)} format={pct} />
           </Group>
 
+          {(s.entrance === "nebula" || s.exit === "smoke") && (
+            <Group title="Fog">
+              <Slider label="Fog size" value={s.fogSize} min={0.5} max={2.5} step={0.05} onChange={(v) => set("fogSize", v)} format={pct} />
+              <Slider label="Fog strength" value={s.fogStrength} min={0.2} max={1.5} step={0.05} onChange={(v) => set("fogStrength", v)} format={pct} />
+              <p className="note">How large the nebula and smoke around each word are, and how visible. Larger fog reads best a little fainter.</p>
+            </Group>
+          )}
+
           <Group title="Atmosphere">
             <Slider label="Glow" value={s.glow} min={0} max={1.5} step={0.05} onChange={(v) => set("glow", v)} format={pct} />
             <Slider label="Breathing" value={s.breathing} min={0} max={1} step={0.05} onChange={(v) => set("breathing", v)} format={pct} />
@@ -315,7 +382,12 @@ export default function Setup({ text, onText, settings, onSettings, source, onSo
             <Slider label="Film grain" value={s.grain} min={0} max={0.12} step={0.005} onChange={(v) => set("grain", v)} format={(v) => (v === 0 ? "none — pure black" : pct(v / 0.12))} />
           </Group>
 
-          <button className="reset-link" onClick={() => onSettings(DEFAULT_SETTINGS)}>
+          <button
+            className="reset-link"
+            onClick={() =>
+              onSettings({ ...DEFAULT_SETTINGS, source: s.source, language: s.language, liveTranscript: s.liveTranscript, banned: s.banned })
+            }
+          >
             Restore default staging
           </button>
         </section>
@@ -323,13 +395,14 @@ export default function Setup({ text, onText, settings, onSettings, source, onSo
 
       <footer className="setup__footer">
         <p className="footer__keys">
-          {isLive ? (
+          {voice ? (
             <>
-              On stage: just speak · <kbd>B</kbd> black · <kbd>R</kbd> clear · <kbd>F</kbd> fullscreen · <kbd>Esc</kbd> setup
+              On stage: speak · <kbd>M</kbd> mute mic · <kbd>B</kbd> black · <kbd>R</kbd> clear · <kbd>F</kbd> fullscreen · <kbd>Esc</kbd> setup
             </>
           ) : (
             <>
-              On stage: <kbd>Space</kbd> / <kbd>→</kbd> / clicker next · <kbd>←</kbd> back · <kbd>B</kbd> black · <kbd>F</kbd> fullscreen · <kbd>Esc</kbd> setup
+              On stage: <kbd>Space</kbd> / <kbd>→</kbd> / clicker next · <kbd>←</kbd> back · <kbd>B</kbd> black · <kbd>F</kbd> fullscreen ·{" "}
+              <kbd>Esc</kbd> setup
             </>
           )}
         </p>
@@ -339,6 +412,70 @@ export default function Setup({ text, onText, settings, onSettings, source, onSo
         </button>
       </footer>
     </main>
+  );
+}
+
+const MIC_LABEL: Record<VoiceStatus, string> = {
+  connecting: "Connecting…",
+  listening: "Listening. Say something",
+  muted: "Muted",
+  error: "Error",
+  stopped: "Stopped",
+};
+
+/** Try the mic and the Soniox key before the show. */
+function MicTest({ language, context }: { language: string; context: string }) {
+  const listenerRef = useRef<VoiceListener | null>(null);
+  const [on, setOn] = useState(false);
+  const [status, setStatus] = useState<{ status: VoiceStatus; detail?: string } | null>(null);
+  const [caption, setCaption] = useState({ settled: "", pending: "" });
+
+  const stop = () => {
+    listenerRef.current?.stop();
+    listenerRef.current = null;
+    setOn(false);
+  };
+
+  const start = () => {
+    stop();
+    setCaption({ settled: "", pending: "" });
+    const listener = new VoiceListener({
+      language,
+      context,
+      onCaption: (settled, pending) => setCaption({ settled, pending }),
+      onStatus: (st, detail) => {
+        setStatus({ status: st, detail });
+        if (st === "error") setOn(false);
+      },
+    });
+    listenerRef.current = listener;
+    setOn(true);
+    void listener.start();
+  };
+
+  // a new language needs a new stream; and never leave the mic open
+  useEffect(() => stop, [language]);
+
+  return (
+    <div className="mictest">
+      <button className={`mictest__btn ${on ? "is-on" : ""}`} onClick={on ? stop : start}>
+        <i className="hud-mic__dot" /> {on ? "Stop test" : "Test the microphone"}
+      </button>
+      {status && (status.status !== "stopped" || caption.settled) && (
+        <div className={`mictest__out hud-mic--${status.status}`}>
+          <span className="mictest__status">
+            {MIC_LABEL[status.status]}
+            {status.detail ? ` · ${status.detail}` : ""}
+          </span>
+          {(caption.settled || caption.pending) && (
+            <span className="mictest__text">
+              {caption.settled.slice(-200)}
+              <span className="stage__caption-pending">{caption.pending}</span>
+            </span>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 

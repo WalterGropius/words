@@ -17,27 +17,22 @@ For the show, use a production build. Fonts are bundled at build time, so it run
 npm run build && npm start
 ```
 
-## Live speech (Soniox)
+## Voice: live from the microphone (Soniox)
 
-Instead of a prepared script, the words can come from live speech: pick **Live speech** under *I. The Text*, and every word appears on stage the moment it is spoken, recognised in real time by [Soniox](https://soniox.com) (`stt-rt-v6`). It is tuned for Czech out of the box.
+Instead of pressing a key for each word, the show can listen and put each word on stage as it is spoken, using [Soniox](https://soniox.com) real-time speech-to-text (Czech by default).
 
-1. Put your Soniox API key on the server, in `.env.local` next to `package.json`:
+1. Create an API key in the [Soniox console](https://console.soniox.com).
+2. Put it in `.env.local` (copy `.env.example`): `SONIOX_API_KEY=...`, then restart `npm run dev`.
+3. In setup, switch **The Text** to **Voice (Soniox)**, pick the language, and press **Test the microphone**.
+4. Raise the curtain and speak. `M` mutes the mic, and the HUD shows the mic state and a running transcript for the operator.
 
-   ```bash
-   SONIOX_KEY=your-soniox-api-key
-   ```
+The real key stays on the server. `/api/soniox-key` hands the browser a single-use key that expires in a minute. Whatever is in the text box goes to Soniox as a vocabulary hint. Voice needs an internet connection and Chrome, Edge or Firefox (Safari records audio in a format Soniox can't detect). For Czech, use Cormorant, EB Garamond, Cinzel, Inter, DM Sans or Space Grotesk: the Fell types and Unifraktur have no ř, ě or ů.
 
-   The key needs the *Temporary API keys* and *Speech-to-Text* permissions. It never reaches the browser: the page asks `/api/soniox` for a short-lived, single-use key and streams the microphone straight to Soniox with that.
-2. Restart the app, choose **Live speech**, pick the spoken language (Czech by default) and the microphone, and use **Test the microphone** to see what Soniox hears.
-3. Raise the curtain and speak. No key presses: `B`, `R` (clear the stage), `F`, `H` and `Esc` still work.
+**Never show these words** keeps hesitations and fillers off the stage (by default the Czech `hm, mhm, mm, ehm, eh, em, e, é, uh, uhm, um, ah, ehe`). Matching ignores case and punctuation, and treats repeated letters as one, so `hm` also catches `Hmmm,`. Words made only of punctuation are dropped too. The operator transcript still shows everything.
 
-**Tuned for Czech:** recognition is restricted to the chosen language (`language_hints_strict`), so Czech never drifts into Slovak or Polish. The Fell types and Unifraktur have no Czech accents of their own, so letters such as ř, ě and ů are borrowed from EB Garamond; Cormorant, EB Garamond and Cinzel carry their own.
+**Live transcript** (on by default) puts each word on stage the moment Soniox hears it, written left to right as running sentences. Word mode uses two large lines, Line mode uses its line count, and Page mode a full page. If Soniox revises a word, only that word and those after it are rewritten. Turn it off to show only confirmed words. That is steadier, but Soniox often confirms only at the end of a sentence.
 
-**Prime with the script** sends the text from the *Script* tab to Soniox as context (up to ~9,000 characters), so names and quotations are recognised. Paste the Czech translation the speaker will quote. The built-in English presets are only sent when the language is English.
-
-In *Line* and *Page* modes, live words are set left to right as they are spoken; a pause starts a new line, and the page departs when it is full. *Word* mode works as usual, and *Leave on its own after* clears the stage when the speaker pauses. If the connection drops, it reconnects by itself; the HUD shows the state.
-
-Live speech needs internet at the venue. Scripts do not.
+In Line and Page mode, spoken words are written left to right into the frame. A pause in speech starts a new line, and a full frame departs like a page.
 
 ## The two steps
 
@@ -59,14 +54,17 @@ Live speech needs internet at the venue. Scripts do not.
 - **Word**: one word at a time, centre stage. Each press sends the previous word off with the exit effect. Because exits are slow, several words drift at once.
 - **Line**: words light up in place along the verse line. When the line is done, it departs.
 - **Page**: the whole passage waits in shadow ("Unspoken words") and is revealed word by word. Spoken words dim so the current word holds the light.
+- **Paragraph** (the default): words gather into a paragraph at a random spot on the stage. When it is full (or, with voice, at a pause once it has a few words; with a script, at a new stanza), the next paragraph begins somewhere else, never overlapping the last one. Once a word has formed it stays readable for a set time ("Each word stays readable for", 1.75 s by default), then leaves with the chosen exit effect ("Then leaves over", 3 s), so a paragraph clears away behind the words still being written. You can set the lines per paragraph, its width, how long words stay and how fast they leave.
 
-**Entrances:** Ink (soft-focus bleed), Quill (written left to right with a glowing nib), Rise, Arrive (letters fly in from the dark), Gather (particles condense into the word).
+**The default look, Nebula**, follows the director's brief: each word appears out of a cosmic nebula that looks and behaves like smoke, is readable for a second or two, then thins into smoke that a draft carries off until it is gone, clearing the view for the words after it. **Restore default staging** in setup brings it back. **Mist** is a variation with a larger but fainter fog; the **Fog** settings (size and strength) tune either one. Staging saved by an older version is reset to it once; the text and voice settings are kept.
 
-**Exits:** Fall (gentle gravity, tumbling like leaves), Ascend (embers), Recede (sinks back into the dark), Dissolve (burns to dust on a breeze), Scatter (3D burst), Fade.
+**Entrances:** Nebula (condenses out of a soft cosmic cloud), Ink (soft-focus bleed), Quill (written left to right with a glowing nib), Rise, Arrive (letters fly in from the dark), Gather (particles condense into the word).
+
+**Exits:** Smoke (thins into smoke carried off on a draft), Fall (gentle gravity, tumbling like leaves), Ascend (embers), Recede (sinks back into the dark), Dissolve (burns to dust on a breeze), Scatter (3D burst), Fade.
 
 **Atmosphere:** glow, breathing, camera drift, stage dust, and optional film grain. With grain off, the background stays true black (0,0,0), so you can composite it with a screen or add blend.
 
-**Typefaces:** IM Fell English, DW Pica, French Canon, Double Pica (17th-century Fell types), Cormorant, EB Garamond, Cinzel, UnifrakturMaguntia. There are also options for italic, capitals, and early-modern long ſ spelling.
+**Typefaces:** IM Fell English, DW Pica, French Canon, Double Pica (17th-century Fell types), Cormorant, EB Garamond, Cinzel, UnifrakturMaguntia, plus three modern sans serifs: Inter, DM Sans and Space Grotesk. There are also options for italic, capitals, and early-modern long ſ spelling.
 
 Settings and text persist in `localStorage`.
 
@@ -81,4 +79,5 @@ Every input goes through one command bus, `src/lib/commands.ts`. A WebSocket or 
 - `src/lib/engine/actor.ts`: one word made of letter quads, with its entrance, breathing, and exit physics.
 - `src/lib/engine/glyphs.ts`: rasterises each word into a per-letter canvas atlas.
 - `src/lib/engine/letterMaterial.ts`: letter shader (blur, quill wipe, burning dissolve edge).
+- `src/lib/soniox.ts`: microphone to Soniox WebSocket, turned into whole words. `src/app/api/soniox-key/route.ts` mints the temporary keys.
 - `src/lib/engine/particles.ts`: GPU particle pool for ash and gather effects. `dust.ts` holds the ambient motes.

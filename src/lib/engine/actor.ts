@@ -18,6 +18,16 @@ const rand = (a: number, b: number) => a + Math.random() * (b - a);
 
 export const randomDrift = () => new Vector3(rand(-30, 30), rand(12, 40), -rand(170, 280));
 
+/**
+ * The draft that carries smoke away: one slowly turning breeze across the
+ * stage, so words leaving close together drift off the same way.
+ */
+export function draftAt(time: number, turbulence: number) {
+  const a = 0.3 + 0.5 * Math.sin(time * 0.043) + 0.25 * Math.sin(time * 0.017 + 1.7);
+  const speed = (35 + 90 * turbulence) * rand(0.85, 1.15);
+  return new Vector3(Math.cos(a) * speed, Math.sin(a) * speed * 0.6 + 8, -rand(10, 40));
+}
+
 /** Perceptual brightness (0..1) → linear light. */
 export const toLinear = (v: number) => Math.pow(clamp01(v), 2.2);
 
@@ -175,6 +185,7 @@ export class WordActor {
       }
     });
     if (opts.effect === "materialize") this.emitGather(env);
+    else if (opts.effect === "nebula") this.emitNebula(env);
   }
 
   /** Show instantly (resize / rebuild). */
@@ -218,6 +229,66 @@ export class WordActor {
     });
   }
 
+  /**
+   * A cosmic nebula: a wide, soft cloud around the word swirls in and condenses
+   * into the letters, while a faint haze lingers around them for a moment.
+   */
+  private emitNebula(env: ActorEnv) {
+    const g = this.glyphs;
+    const step = g.emPx / (env.density * 0.75);
+    const scale = 1 / g.k;
+    const f = this.fontPx;
+    const turb = env.settings.turbulence;
+    const dur = this.enter.duration;
+    const startAt = env.time + (this.enter.delay ?? 0);
+    const c = this.center;
+    const { fogSize, fogStrength } = env.settings;
+    const rx = (g.width * 0.55 + f * 1.4) * fogSize;
+    const ry = f * (1.1 + turb * 0.8) * fogSize;
+    // a point somewhere in the cloud, denser towards its heart
+    const inCloud = () => {
+      const th = Math.random() * Math.PI * 2;
+      const r = Math.sqrt(Math.random());
+      return new Vector3(c.x + Math.cos(th) * rx * r, c.y + Math.sin(th) * ry * r, c.z - rand(0, 420) * fogSize);
+    };
+    this.letters.forEach((L, i) => {
+      for (const p of sampleLetter(g, i, step)) {
+        const from = inCloud();
+        env.particles.spawn({
+          x: from.x,
+          y: from.y,
+          z: from.z,
+          vx: L.home.x + p.dx,
+          vy: L.home.y + p.dy,
+          vz: L.home.z,
+          birth: startAt + L.enterDelay * 0.5 + rand(0, dur * 0.2),
+          life: dur * rand(0.8, 1.05),
+          size: step * scale * rand(0.9, 1.6),
+          mode: 3,
+          alpha: 0.35 * fogStrength,
+        });
+      }
+    });
+    // the haze the word came out of, thinning away on the air
+    const puffs = Math.round((10 + this.letters.length * 7) * fogSize);
+    for (let k = 0; k < puffs; k++) {
+      const at = inCloud();
+      env.particles.spawn({
+        x: at.x,
+        y: at.y,
+        z: at.z * 0.5,
+        vx: rand(-8, 8) * (0.5 + turb),
+        vy: rand(-3, 6) * (0.5 + turb),
+        vz: rand(-10, 10),
+        birth: startAt + rand(0, dur * 0.4),
+        life: dur * rand(1.2, 2),
+        size: f * rand(0.9, 1.8) * fogSize,
+        mode: 2,
+        alpha: 0.08 * fogStrength,
+      });
+    }
+  }
+
   // ─────────────────────────────── exit ───────────────────────────────
 
   beginExit(opts: ExitOptions, env: ActorEnv) {
@@ -230,6 +301,11 @@ export class WordActor {
     const span = opts.stagger * Math.min(opts.duration * 0.35, 1.6);
     const order = this.letters.map((_, i) => i);
     if (opts.effect === "fall" || opts.effect === "rise") order.sort(() => Math.random() - 0.5);
+    if (opts.effect === "smoke") {
+      this.wind = draftAt(env.time, env.settings.turbulence);
+      // the draft takes the downwind letters first
+      if (this.wind.x > 0) order.reverse();
+    }
     order.forEach((idx, k) => {
       const L = this.letters[idx];
       L.exitDelay = opts.effect === "dissolve" ? 0 : n > 1 ? (k / (n - 1)) * span : 0;
@@ -237,6 +313,42 @@ export class WordActor {
       L.done = false;
     });
     if (opts.effect === "dissolve") this.emitAsh(env);
+    else if (opts.effect === "smoke") this.emitSmoke(env);
+  }
+
+  /** The draft the smoke rides on. */
+  private wind = new Vector3();
+
+  /** Each letter thins into soft smoke that the draft carries off, curling and spreading until it's gone. */
+  private emitSmoke(env: ActorEnv) {
+    const g = this.glyphs;
+    const turb = env.settings.turbulence;
+    const step = g.emPx / (env.density * 0.6);
+    const scale = 1 / g.k;
+    const f = this.fontPx;
+    const dur = this.exitOpts.duration;
+    const delay = this.exitOpts.delay ?? 0;
+    const { fogSize, fogStrength } = env.settings;
+    const spread = (8 + 30 * turb) * fogSize;
+    const brightness = this.levelNow * this.fade;
+    this.letters.forEach((L, i) => {
+      for (const p of sampleLetter(g, i, step)) {
+        env.particles.spawn({
+          x: L.pos.x + p.dx * L.scale,
+          y: L.pos.y + p.dy * L.scale,
+          z: L.pos.z,
+          vx: this.wind.x * rand(0.5, 1.2) + rand(-1, 1) * spread,
+          vy: this.wind.y * rand(0.5, 1.2) + rand(-0.6, 1) * spread,
+          vz: this.wind.z + rand(-1, 1) * spread,
+          birth: env.time + delay + L.exitDelay + rand(0, dur * 0.3),
+          life: dur * rand(0.7, 1.1) + 0.5,
+          // big, faint, overlapping puffs: together they read as one wisp, not as dust
+          size: f * rand(0.35, 0.65) * fogSize,
+          mode: 2,
+          alpha: 0.14 * fogStrength * Math.max(0.35, brightness),
+        });
+      }
+    });
   }
 
   /** Quick fade (used for rewinding, resets, ghosts). */
@@ -349,7 +461,15 @@ export class WordActor {
         continue;
       }
       if (!L.exitStarted) this.startLetterExit(L, env);
-      const dur = exit.effect === "fade" ? Math.min(exit.duration * 0.5, 3) : exit.effect === "dissolve" ? exit.duration * 0.6 : exit.duration;
+      // smoke: the letter itself is gone halfway; its smoke drifts on for the rest
+      const dur =
+        exit.effect === "fade"
+          ? Math.min(exit.duration * 0.5, 3)
+          : exit.effect === "dissolve"
+            ? exit.duration * 0.6
+            : exit.effect === "smoke"
+              ? exit.duration * 0.5
+              : exit.duration;
       const u = clamp01(tl / dur);
       if (u >= 1) {
         L.done = true;
@@ -414,6 +534,15 @@ export class WordActor {
         L.blur = (1 - u) * 0.3;
         break;
       }
+      case "nebula": {
+        // the word condenses out of the cloud: deep in the haze, soft and swollen, then sharp
+        const e = easeOutCubic(u);
+        L.pos.z = bz - f * 1.5 * (1 - e);
+        L.alpha = smooth(0.3, 0.95, u);
+        L.blur = Math.pow(1 - smooth(0.25, 1, u), 1.5) * 0.32;
+        L.scale = 1 + 0.12 * (1 - e);
+        break;
+      }
     }
   }
 
@@ -442,6 +571,14 @@ export class WordActor {
       case "rise": {
         L.vel.set(rand(-10, 10), rand(10, 40), -rand(20, 120));
         L.angVel.set(rand(-0.6, 0.6) * turb, rand(-0.6, 0.6) * turb, rand(-0.5, 0.5) * turb);
+        break;
+      }
+      case "smoke": {
+        // the letter is pulled a little way along the draft as it thins
+        L.vel.copy(this.wind).multiplyScalar(0.35);
+        L.vel.x += rand(-4, 4) * turb;
+        L.vel.y += rand(-2, 6) * turb;
+        L.angVel.set(rand(-0.1, 0.1) * turb, rand(-0.15, 0.15) * turb, rand(-0.12, 0.12) * turb);
         break;
       }
       case "scatter": {
@@ -506,6 +643,15 @@ export class WordActor {
         L.alpha = 1 - smooth(0.15, 1, u);
         L.blur = Math.min(0.6, Math.abs(L.pos.z) / 1800) + u * 0.15;
         L.scale = 1;
+        break;
+      }
+      case "smoke": {
+        const e = easeOutCubic(u);
+        L.pos.set(S.x + L.vel.x * tl, S.y + L.vel.y * tl, S.z + L.vel.z * tl);
+        L.rot.set(R.x + L.angVel.x * tl, R.y + L.angVel.y * tl, R.z + L.angVel.z * tl);
+        L.alpha = 1 - smooth(0.05, 1, u);
+        L.blur = e * 0.32;
+        L.scale = 1 + 0.18 * e;
         break;
       }
       case "dissolve": {

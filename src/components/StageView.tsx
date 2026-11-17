@@ -3,37 +3,44 @@
 import { useEffect, useRef, useState } from "react";
 import { commands, type Command } from "@/lib/commands";
 import { Stage, type StageInfo } from "@/lib/engine/stage";
-import type { Settings, Source } from "@/lib/settings";
-import { LiveTranscriber, scriptContext, type LiveConfig, type LiveStatus } from "@/lib/soniox";
+import type { Settings } from "@/lib/settings";
+import { VoiceListener, type VoiceStatus } from "@/lib/soniox";
 
 interface Props {
   text: string;
   settings: Settings;
-  source: Source;
-  live: LiveConfig;
   onExit: () => void;
 }
 
 const NEXT_KEYS = new Set([" ", "ArrowRight", "ArrowDown", "PageDown", "Enter"]);
 const PREV_KEYS = new Set(["ArrowLeft", "ArrowUp", "PageUp", "Backspace"]);
 
-export default function StageView({ text, settings, source, live, onExit }: Props) {
-  const isLive = source === "live";
+const VOICE_LABEL: Record<VoiceStatus, string> = {
+  connecting: "Connecting…",
+  listening: "Listening",
+  muted: "Mic muted",
+  error: "Mic error",
+  stopped: "Mic off",
+};
+
+export default function StageView({ text, settings, onExit }: Props) {
+  const voice = settings.source === "voice";
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const stageRef = useRef<Stage | null>(null);
+  const listenerRef = useRef<VoiceListener | null>(null);
+  const [voiceStatus, setVoiceStatus] = useState<{ status: VoiceStatus; detail?: string }>({ status: "connecting" });
+  const [caption, setCaption] = useState({ settled: "", pending: "" });
   const [info, setInfo] = useState<StageInfo | null>(null);
   const [hud, setHud] = useState(true);
   const [hint, setHint] = useState(true);
   const [idle, setIdle] = useState(false);
-  const [liveStatus, setLiveStatus] = useState<LiveStatus>({ state: "idle" });
-  const [attempt, setAttempt] = useState(0);
-  const stageRef = useRef<Stage | null>(null);
 
   // the show itself
   useEffect(() => {
     const canvas = canvasRef.current!;
-    const stage = new Stage(canvas, settings, { onInfo: setInfo, live: isLive });
+    const stage = new Stage(canvas, settings, { onInfo: setInfo });
     stageRef.current = stage;
-    void stage.load(isLive ? "" : text, settings);
+    void (voice ? stage.listen(settings) : stage.load(text, settings));
     const unsub = commands.subscribe((cmd: Command) => {
       if (cmd === "next") stage.next();
       else if (cmd === "prev") stage.prev();
@@ -51,24 +58,46 @@ export default function StageView({ text, settings, source, live, onExit }: Prop
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // live speech: the microphone drives the show
+  // the microphone, in voice mode
   useEffect(() => {
-    if (!isLive) return;
-    const t = new LiveTranscriber(live, { onWords: (b) => stageRef.current?.appendLive(b), onStatus: setLiveStatus }, scriptContext(text, live));
-    void t.start();
-    return () => t.stop();
-    // one session per show (or per retry)
+    if (!voice) return;
+    const listener = new VoiceListener({
+      language: settings.language,
+      context: text,
+      banned: settings.banned,
+      ...(settings.liveTranscript
+        ? {
+            onSegment: (words: string[], done: boolean) => {
+              stageRef.current?.transcribe(words);
+              if (done) stageRef.current?.endSegment();
+              if (words.length) setHint(false);
+            },
+          }
+        : {
+            onWord: (w: string) => {
+              stageRef.current?.speak(w);
+              setHint(false);
+            },
+            onPause: () => stageRef.current?.pause(),
+          }),
+      onCaption: (settled, pending) => setCaption({ settled, pending }),
+      onStatus: (status, detail) => setVoiceStatus({ status, detail }),
+    });
+    listenerRef.current = listener;
+    void listener.start();
+    return () => {
+      listener.stop();
+      listenerRef.current = null;
+    };
+    // one listener per show, like the stage
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [attempt]);
+  }, []);
 
   // keyboard + presentation clickers
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.metaKey || e.ctrlKey || e.altKey) return;
-      if (isLive && (NEXT_KEYS.has(e.key) || PREV_KEYS.has(e.key))) {
-        // the voice drives a live show; keep keys from scrolling or clicking anything
-        e.preventDefault();
-      } else if (NEXT_KEYS.has(e.key)) {
+      if (NEXT_KEYS.has(e.key)) {
         e.preventDefault();
         if (!e.repeat) commands.send("next");
         setHint(false);
@@ -79,6 +108,8 @@ export default function StageView({ text, settings, source, live, onExit }: Prop
         commands.send("blackout");
       } else if (e.key === "r" || e.key === "R") {
         commands.send("reset");
+      } else if ((e.key === "m" || e.key === "M") && listenerRef.current) {
+        listenerRef.current.setMuted(!listenerRef.current.isMuted);
       } else if (e.key === "h" || e.key === "H") {
         setHud((v) => !v);
       } else if (e.key === "f" || e.key === "F") {
@@ -90,7 +121,7 @@ export default function StageView({ text, settings, source, live, onExit }: Prop
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onExit, isLive]);
+  }, [onExit]);
 
   // hide the cursor and hints when nobody's touching anything
   useEffect(() => {
@@ -114,8 +145,7 @@ export default function StageView({ text, settings, source, live, onExit }: Prop
   }, []);
 
   const showHud = hud && !idle;
-  const progress = !isLive && info && info.total > 0 ? Math.max(0, Math.min(info.cursor + 1, info.total)) / info.total : 0;
-  const liveTrouble = isLive && (liveStatus.state === "error" || liveStatus.state === "reconnecting");
+  const progress = info && info.total > 0 ? Math.max(0, Math.min(info.cursor + 1, info.total)) / info.total : 0;
 
   return (
     <main className={`stage ${idle ? "stage--idle" : ""}`}>
@@ -123,23 +153,35 @@ export default function StageView({ text, settings, source, live, onExit }: Prop
         ref={canvasRef}
         className="stage__canvas"
         onClick={() => {
-          if (isLive) return;
           commands.send("next");
           setHint(false);
         }}
         onContextMenu={(e) => {
           e.preventDefault();
-          if (!isLive) commands.send("prev");
+          commands.send("prev");
         }}
       />
 
-      {isLive ? (
-        <div className={`stage__hint ${(hint && info?.cursor === -1 && liveStatus.state === "listening") || (liveTrouble && hud) ? "is-on" : ""}`}>
-          {liveTrouble ? liveStatus.message ?? "Live speech stopped." : "Listening. Speak, and the words will appear."}
-        </div>
-      ) : (
-        <div className={`stage__hint ${hint && info?.cursor === -1 ? "is-on" : ""}`}>
-          <span className="stage__hint-key">Space</span> to speak the first word
+      <div className={`stage__hint ${hint && info?.cursor === -1 && voiceStatus.status !== "error" ? "is-on" : ""}`}>
+        {voice ? (
+          voiceStatus.status === "listening" ? (
+            "Listening. Begin speaking"
+          ) : (
+            VOICE_LABEL[voiceStatus.status]
+          )
+        ) : (
+          <>
+            <span className="stage__hint-key">Space</span> to speak the first word
+          </>
+        )}
+      </div>
+
+      {voice && voiceStatus.status === "error" && <div className="stage__error">{voiceStatus.detail}</div>}
+
+      {voice && (
+        <div className={`stage__caption ${showHud ? "is-on" : ""}`}>
+          {caption.settled.slice(-160)}
+          <span className="stage__caption-pending">{caption.pending}</span>
         </div>
       )}
 
@@ -149,19 +191,17 @@ export default function StageView({ text, settings, source, live, onExit }: Prop
         <button className="hud-back" onClick={onExit}>
           ← Setup
         </button>
-        {isLive && (
-          <div className={`hud-live hud-live--${liveStatus.state}`}>
-            <i className="hud-live__dot" />
-            {LIVE_LABEL[liveStatus.state]}
-            {liveStatus.state === "error" && (
-              <button className="hud-retry" onClick={() => setAttempt((a) => a + 1)}>
-                Try again
-              </button>
-            )}
+        {voice && (
+          <div className={`hud-mic hud-mic--${voiceStatus.status}`} title={voiceStatus.detail}>
+            <i className="hud-mic__dot" />
+            {VOICE_LABEL[voiceStatus.status]}
+            {voiceStatus.status === "connecting" && voiceStatus.detail ? ` · ${voiceStatus.detail}` : ""}
           </div>
         )}
         <div className="hud-keys">
-          {!isLive && (
+          {voice ? (
+            <span><kbd>M</kbd> mute</span>
+          ) : (
             <>
               <span><kbd>Space</kbd> next</span>
               <span><kbd>←</kbd> back</span>
@@ -173,19 +213,11 @@ export default function StageView({ text, settings, source, live, onExit }: Prop
           <span><kbd>H</kbd> hide</span>
         </div>
         <div className="hud-count">
-          {info ? (isLive ? `${info.total} words` : `${Math.max(0, Math.min(info.cursor + 1, info.total))} / ${info.total}`) : ""}
+          {info ? (voice ? `${info.total} words` : `${Math.max(0, Math.min(info.cursor + 1, info.total))} / ${info.total}`) : ""}
           {info?.blackout ? " · black" : ""}
         </div>
-        <div className="hud-progress" style={{ transform: `scaleX(${progress})` }} />
+        {!voice && <div className="hud-progress" style={{ transform: `scaleX(${progress})` }} />}
       </div>
     </main>
   );
 }
-
-const LIVE_LABEL: Record<LiveStatus["state"], string> = {
-  idle: "Mic off",
-  connecting: "Connecting",
-  listening: "Listening",
-  reconnecting: "Reconnecting",
-  error: "Stopped",
-};
