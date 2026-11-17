@@ -1047,3 +1047,11 @@ kbd {
     display: none;
   }
 }
+
+.live__banned {
+  background-image: none;
+  padding-right: 12px;
+  resize: vertical;
+  min-height: 2.6em;
+  line-height: 1.4;
+}

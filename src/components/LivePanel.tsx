@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  DEFAULT_BANNED,
   LANGUAGES,
   LiveTranscriber,
   listMicrophones,
@@ -197,6 +198,27 @@ export default function LivePanel({ live, onLive, configured, script, fontFamily
         {live.instant
           ? "Words appear as soon as they are heard, and the newest word is corrected if Soniox changes its mind."
           : "Words appear only once Soniox is sure of them: exact, but a second or two behind the voice."}
+      </p>
+
+      <label className="field">
+        <span className="field__label">Never show these words</span>
+        <textarea
+          className="field__select live__banned"
+          rows={2}
+          value={live.banned}
+          onChange={(e) => set("banned", e.target.value)}
+          spellCheck={false}
+          placeholder="hm, ehm, eh, uh…"
+        />
+      </label>
+      <p className="note">
+        Hesitations and fillers, separated by commas. Drawn-out spellings count too: <em>hm</em> also catches{" "}
+        <em>hmmm</em>, <em>eh</em> catches <em>ehhh</em>.{" "}
+        {live.banned !== DEFAULT_BANNED && (
+          <button className="live__link" onClick={() => set("banned", DEFAULT_BANNED)}>
+            Restore the Czech defaults
+          </button>
+        )}
       </p>
 
       <div className="live__test">

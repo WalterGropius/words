@@ -27,10 +27,42 @@ export interface LiveConfig {
    * wait for final words only (exact, but a second or two behind the voice).
    */
   instant: boolean;
+  /** Words never put on stage (hesitations and fillers), separated by commas or spaces. */
+  banned: string;
 }
 
 /** Tuned for a Czech-speaking stage: Czech recognition, restricted to Czech. */
-export const DEFAULT_LIVE: LiveConfig = { language: "cs", deviceId: "", primeWithScript: true, instant: true };
+export const DEFAULT_BANNED = "hm, mhm, mm, ehm, eh, em, e, é, uh, uhm, um, ah, ehe";
+
+export const DEFAULT_LIVE: LiveConfig = {
+  language: "cs",
+  deviceId: "",
+  primeWithScript: true,
+  instant: true,
+  banned: DEFAULT_BANNED,
+};
+
+/**
+ * A word reduced to what identifies a hesitation: lower case, letters and digits only,
+ * and drawn-out letters squeezed, so "Hmmm," "hmm" and "hm" are all "hm".
+ */
+function fillerKey(word: string): string {
+  return word
+    .toLocaleLowerCase()
+    .normalize("NFC")
+    .replace(/[^\p{L}\p{N}]/gu, "")
+    .replace(/(\p{L})\1+/gu, "$1");
+}
+
+/** Builds a test for the banned words of a LiveConfig. */
+export function bannedFilter(list: string): (word: string) => boolean {
+  const keys = new Set(list.split(/[\s,;]+/).map(fillerKey).filter(Boolean));
+  return (word) => {
+    const k = fillerKey(word);
+    // a word made only of punctuation ("…", "-") is never worth showing either
+    return k === "" || keys.has(k);
+  };
+}
 
 export const LANGUAGES: { code: string; label: string }[] = [
   { code: "cs", label: "Čeština (Czech)" },
@@ -296,6 +328,10 @@ export class LiveTranscriber {
   private readonly context: string;
   private readonly cb: LiveCallbacks;
   private readonly words: WordAssembler;
+  private readonly isBanned: (word: string) => boolean;
+  /** Assembler word index → stage word index, or -1 for a word that was held back. */
+  private readonly shown: number[] = [];
+  private shownCount = 0;
 
   private stream: MediaStream | null = null;
   private audio: AudioContext | null = null;
@@ -316,6 +352,7 @@ export class LiveTranscriber {
     this.cb = callbacks;
     this.context = context.trim().slice(0, CONTEXT_CHARS);
     this.words = new WordAssembler(config.instant);
+    this.isBanned = bannedFilter(config.banned);
   }
 
   get state() {
@@ -479,9 +516,14 @@ export class LiveTranscriber {
 
   private handleTokens(tokens: SonioxToken[]) {
     const { words, pause, provisional, corrections } = this.words.feed(tokens);
-    corrections.forEach((c) => this.cb.onCorrect?.(c));
+    for (const c of corrections) {
+      // only a word that made it to the stage can be corrected there; a held
+      // back word stays held back, and a word now heard as a filler stays put
+      const at = this.shown[c.index];
+      if (at !== undefined && at >= 0 && !this.isBanned(c.word)) this.cb.onCorrect?.({ index: at, word: c.word });
+    }
     this.release(words, pause);
-    this.cb.onProvisional?.(provisional);
+    this.cb.onProvisional?.(this.clean(provisional));
 
     // Soniox sends a response for every chunk of audio; an unchanged
     // hypothesis means the speaker has stopped for now
@@ -518,7 +560,23 @@ export class LiveTranscriber {
   }
 
   private release(words: string[], pause: boolean) {
-    if (words.length || pause) this.cb.onWords({ words, pause });
+    const kept: string[] = [];
+    for (const w of words) {
+      if (this.isBanned(w)) {
+        this.shown.push(-1);
+      } else {
+        this.shown.push(this.shownCount++);
+        kept.push(w);
+      }
+    }
+    if (kept.length || pause) this.cb.onWords({ words: kept, pause });
+  }
+
+  private clean(text: string) {
+    return text
+      .split(/\s+/)
+      .filter((w) => w && !this.isBanned(w))
+      .join(" ");
   }
 
   private fail(message: string, fatal: boolean) {

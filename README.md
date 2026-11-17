@@ -39,6 +39,8 @@ In *Line* and *Page* modes, live words are set left to right as they are spoken;
 
 **Instant words** (on by default) puts each word on stage from Soniox's provisional hypothesis, a few hundred milliseconds after it is spoken, instead of waiting a second or two for Soniox to confirm it. If the confirmed text differs, the newest word is swapped in place. When the speaker stops for about half a second the app asks Soniox to finalise straight away, so the last word of a phrase does not hang. Turn it off to show only confirmed words. The entrance effect also adds to the delay you feel: a short *Entrance* duration makes words land sooner.
 
+**Never show these words** holds hesitations and fillers that never reach the stage. The default is a Czech list (*hm, mhm, mm, ehm, eh, em, e, é, uh, uhm, um, ah, ehe*). Matching ignores case and punctuation and squeezes drawn-out letters, so *hm* also catches *Hmmm,* and *eh* catches *ehhh*. Edit the list in the live panel; it applies to the stage and to the microphone test.
+
 Live speech needs internet at the venue. Scripts do not.
 
 ## The two steps
