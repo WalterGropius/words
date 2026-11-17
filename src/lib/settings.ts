@@ -54,6 +54,13 @@ export interface Settings {
   smokeSpeckFade: number; // nebula + smoke: 0..2 how strongly small puffs fade (so they don't show as specks)
   turbulence: number; // 0..1
 
+  // Wording
+  holdShortWords: boolean; // a short word waits for the next and is written with it
+  shortWordMax: number; // 1..4 letters counted as short
+  lexicon: string[]; // phrases always written exactly so
+  spellingOn: boolean; // snap near-misses onto the spelling list
+  spelling: string[]; // names and terms
+
   // Atmosphere
   glow: number; // 0..1.5
   dust: number; // 0..1
@@ -109,6 +116,12 @@ export const DEFAULT_SETTINGS: Settings = {
   smokeContrast: 1.6,
   smokeSpeckFade: 1,
   turbulence: 0.45,
+
+  holdShortWords: true,
+  shortWordMax: 3,
+  lexicon: ["být, či nebýt"],
+  spellingOn: false,
+  spelling: [],
 
   glow: 0.55,
   dust: 0.35,

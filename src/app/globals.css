@@ -890,6 +890,22 @@ kbd {
   margin-top: 12px;
 }
 
+.list-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.list-editor__row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.list-editor__row .field {
+  flex: 1;
+}
+
 /* tabs for the staging controls */
 .tabs {
   display: flex;

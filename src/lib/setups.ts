@@ -73,7 +73,8 @@ export function storeActiveSetupId(id: string | null) {
 /** Do the current settings (and text, if the setup carries one) still match a saved setup? */
 export function matchesSetup(setup: SavedSetup, settings: Settings, text: string) {
   const keys = Object.keys(DEFAULT_SETTINGS) as (keyof Settings)[];
-  if (keys.some((k) => setup.settings[k] !== settings[k])) return false;
+  const same = (a: unknown, b: unknown) => a === b || (typeof a === "object" && JSON.stringify(a) === JSON.stringify(b));
+  if (keys.some((k) => !same(setup.settings[k], settings[k]))) return false;
   return setup.text === undefined || setup.text === text;
 }
 

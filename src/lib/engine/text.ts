@@ -17,6 +17,8 @@ export interface ParsedText {
 export interface TextOptions {
   caps: boolean;
   longS: boolean;
+  /** Rewrite the script's words before styling (lexicon, spelling); must keep the count. */
+  rewrite?: (words: string[]) => string[];
 }
 
 /** Early-modern long s: ſ everywhere except word-final and before f/b/k. */
@@ -54,11 +56,14 @@ export function parseText(raw: string, opts: TextOptions): ParsedText {
     const ids: number[] = [];
     for (const word of words) {
       ids.push(tokens.length);
-      tokens.push({ index: tokens.length, text: styleWord(word, opts), line: lineIdx, stanza });
+      tokens.push({ index: tokens.length, text: word, line: lineIdx, stanza });
     }
     lines.push(ids);
     lineStanza.push(stanza);
   }
+  const raw2 = tokens.map((t) => t.text);
+  const rewritten = opts.rewrite ? opts.rewrite(raw2) : raw2;
+  tokens.forEach((t, i) => (t.text = styleWord(rewritten.length === raw2.length ? rewritten[i] : raw2[i], opts)));
   return { tokens, lines, lineStanza };
 }
 

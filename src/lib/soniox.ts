@@ -25,6 +25,8 @@ export interface VoiceOptions {
   language: string;
   /** Background text (e.g. the script) that biases recognition toward its vocabulary. */
   context?: string;
+  /** Names and phrases to listen out for (the lexicon, the spelling list). */
+  terms?: string[];
   /** Comma-separated words never handed out (the caption still shows them). */
   banned?: string;
   onWord?: (word: string) => void;
@@ -203,7 +205,10 @@ export class VoiceListener {
           audio_format: "auto",
           language_hints: this.opts.language ? [this.opts.language] : undefined,
           enable_endpoint_detection: true,
-          context: context ? { text: context } : undefined,
+          context:
+            context || this.opts.terms?.length
+              ? { text: context || undefined, terms: this.opts.terms?.length ? this.opts.terms.slice(0, 200) : undefined }
+              : undefined,
         }),
       );
       const recorder = new MediaRecorder(this.stream!, { mimeType });

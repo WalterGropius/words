@@ -86,12 +86,13 @@ const EXIT_NOTES: Record<Exit, string> = {
   fade: "Simply fades.",
 };
 
-type Tab = "mode" | "type" | "motion" | "fog" | "air";
+type Tab = "mode" | "type" | "motion" | "fog" | "wording" | "air";
 const TABS: { id: Tab; label: string }[] = [
   { id: "mode", label: "Mode" },
   { id: "type", label: "Typeface" },
   { id: "motion", label: "Entrance & Exit" },
   { id: "fog", label: "Fog" },
+  { id: "wording", label: "Wording" },
   { id: "air", label: "Atmosphere" },
 ];
 
@@ -457,6 +458,9 @@ export default function Setup({ text, onText, settings, onSettings, onPlay }: Pr
               </Group>
               </>
             )}
+            {tab === "wording" && (
+              <Wording settings={s} set={set} />
+            )}
             {tab === "air" && (
               <>
               <Group title="Atmosphere">
@@ -474,7 +478,16 @@ export default function Setup({ text, onText, settings, onSettings, onPlay }: Pr
           <button
             className="reset-link"
             onClick={() =>
-              onSettings({ ...DEFAULT_SETTINGS, source: s.source, language: s.language, liveTranscript: s.liveTranscript, banned: s.banned })
+              onSettings({
+                ...DEFAULT_SETTINGS,
+                source: s.source,
+                language: s.language,
+                liveTranscript: s.liveTranscript,
+                banned: s.banned,
+                lexicon: s.lexicon,
+                spelling: s.spelling,
+                spellingOn: s.spellingOn,
+              })
             }
           >
             Restore default staging
@@ -640,5 +653,106 @@ function Toggle(props: { label: string; value: boolean; onChange: (v: boolean) =
       <span className="toggle__box" />
       <span className="toggle__label">{props.label}</span>
     </button>
+  );
+}
+
+type Set = <K extends keyof Settings>(key: K, value: Settings[K]) => void;
+
+function Wording({ settings: s, set }: { settings: Settings; set: Set }) {
+  const [list, setList] = useState<"lexicon" | "spelling">("lexicon");
+  return (
+    <>
+      <Group title="Short words">
+        <Toggle label="Keep short words with the next word" value={s.holdShortWords} onChange={(v) => set("holdShortWords", v)} />
+        {s.holdShortWords && (
+          <Slider
+            label="Short means up to"
+            value={s.shortWordMax}
+            min={1}
+            max={4}
+            step={1}
+            onChange={(v) => set("shortWordMax", v)}
+            format={(v) => `${v} letter${v === 1 ? "" : "s"}`}
+          />
+        )}
+        <p className="note">
+          A short word (<em>a, v, se, ale, no</em>…) never stands alone at the end of a line or a paragraph: it waits for the
+          next word and appears with it, on the new row or in the new paragraph if that word starts one. In Word mode the
+          two appear together. In Line and Page modes with a script the page is laid out in advance, so this doesn&apos;t apply.
+        </p>
+      </Group>
+
+      <Group title="Lexicon and spelling">
+        <Segmented
+          value={list}
+          options={[
+            { value: "lexicon", label: `Lexicon (${s.lexicon.filter((l) => l.trim()).length})` },
+            { value: "spelling", label: `Spelling${s.spellingOn ? ` (${s.spelling.filter((l) => l.trim()).length})` : " · off"}` },
+          ]}
+          onChange={setList}
+        />
+        {list === "lexicon" ? (
+          <>
+            <p className="note">
+              Phrases always written exactly as here. Whenever the words match, ignoring capitals and punctuation, they take
+              this form: <em>být či nebýt</em> becomes <em>být, či nebýt</em>. Spoken, the start of a phrase waits until it&apos;s
+              complete, so it never has to be corrected on stage.
+            </p>
+            <ListEditor items={s.lexicon} onChange={(v) => set("lexicon", v)} placeholder="být, či nebýt" add="Add a phrase" />
+          </>
+        ) : (
+          <>
+            <Toggle label="Correct near-misses to these spellings" value={s.spellingOn} onChange={(v) => set("spellingOn", v)} />
+            <p className="note">
+              Names and words that should always be spelt this way. A heard word that starts the same and is off by one
+              consonant, or sounds the same (<em>Rozenkranc</em> → <em>Rosencrantz</em>), is replaced. They&apos;re also sent to
+              Soniox as words to listen for.
+            </p>
+            <ListEditor items={s.spelling} onChange={(v) => set("spelling", v)} placeholder="Rosencrantz" add="Add a name or word" />
+          </>
+        )}
+      </Group>
+    </>
+  );
+}
+
+function ListEditor(props: { items: string[]; onChange: (items: string[]) => void; placeholder: string; add: string }) {
+  const { items, onChange } = props;
+  const [draft, setDraft] = useState("");
+  const commit = () => {
+    const v = draft.trim();
+    if (!v) return;
+    onChange([...items, v]);
+    setDraft("");
+  };
+  return (
+    <div className="list-editor">
+      {items.map((item, i) => (
+        <div className="list-editor__row" key={i}>
+          <input
+            className="field"
+            value={item}
+            onChange={(e) => onChange(items.map((x, j) => (j === i ? e.target.value : x)))}
+            onBlur={() => !item.trim() && onChange(items.filter((_, j) => j !== i))}
+            spellCheck={false}
+          />
+          <button className="icon" onClick={() => onChange(items.filter((_, j) => j !== i))} title="Remove" aria-label="Remove">
+            ×
+          </button>
+        </div>
+      ))}
+      <form
+        className="list-editor__row"
+        onSubmit={(e) => {
+          e.preventDefault();
+          commit();
+        }}
+      >
+        <input className="field" value={draft} onChange={(e) => setDraft(e.target.value)} placeholder={props.placeholder} spellCheck={false} />
+        <button className="btn" type="submit" disabled={!draft.trim()}>
+          {props.add}
+        </button>
+      </form>
+    </div>
   );
 }

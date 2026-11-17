@@ -64,6 +64,7 @@ export default function StageView({ text, settings, onExit }: Props) {
     const listener = new VoiceListener({
       language: settings.language,
       context: text,
+      terms: [...settings.lexicon, ...(settings.spellingOn ? settings.spelling : [])].map((t) => t.trim()).filter(Boolean),
       banned: settings.banned,
       ...(settings.liveTranscript
         ? {

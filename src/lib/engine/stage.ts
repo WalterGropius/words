@@ -19,6 +19,7 @@ import { Dust } from "./dust";
 import { measureText, rasterizeWord, type FontSpec, type WordGlyphs } from "./glyphs";
 import { ParticleSystem } from "./particles";
 import { paginate, parseText, styleWord, type ParsedText } from "./text";
+import { compose, isShort, rewriteAll, type WordingOptions } from "../wording";
 
 export interface StageInfo {
   cursor: number;
@@ -107,6 +108,8 @@ interface LiveWord {
   row: number;
   x: number;
   count: number;
+  /** A short word written together with the word after it. */
+  glued?: boolean;
 }
 
 /** Settings that change where/how big words are; changing them restarts the show. */
@@ -124,8 +127,21 @@ function layoutKey(s: Settings) {
     s.align,
     s.paragraphLines,
     s.paragraphWidth,
+    s.holdShortWords,
+    s.shortWordMax,
+    s.spellingOn,
+    JSON.stringify(s.lexicon),
+    JSON.stringify(s.spelling),
   ].join("|");
 }
+
+const wordingOf = (s: Settings): WordingOptions => ({
+  lexicon: s.lexicon ?? [],
+  spelling: s.spelling ?? [],
+  spellingOn: !!s.spellingOn,
+  holdShort: !!s.holdShortWords,
+  shortMax: s.shortWordMax ?? 3,
+});
 
 const rand = (a: number, b: number) => a + Math.random() * (b - a);
 
@@ -189,6 +205,14 @@ export class Stage {
   private paragraphBoxes: Box[] = [];
   /** Paragraph mode: when each written word starts to leave (stage time). */
   private fadeAt = new Map<WordActor, number>();
+  /** Script: the first of the short words pressed but held back for the next word. */
+  private pending: number | null = null;
+  /** Voice, word by word: words heard but not yet written (held back, or a lexicon phrase still coming). */
+  private heard: string[] = [];
+  /** Live transcript: words held back at the end of a finished segment, carried into the next. */
+  private carry: string[] = [];
+  private lastInput: string[] = [];
+  private lastHeld = 0;
 
   private width = 1;
   private height = 1;
@@ -249,7 +273,8 @@ export class Stage {
     this.font = font;
     this.hardClear();
     this.live = false;
-    this.parsed = parseText(text, { caps: settings.caps, longS: settings.longS });
+    const wording = wordingOf(settings);
+    this.parsed = parseText(text, { caps: settings.caps, longS: settings.longS, rewrite: (w) => rewriteAll(w, wording) });
     this.pages =
       settings.mode === "word" || settings.mode === "paragraph"
         ? []
@@ -286,20 +311,36 @@ export class Stage {
     this.emit();
   }
 
-  /** Put one heard word on stage (live mode). */
+  /** Put one heard word on stage (live mode). Short words and lexicon phrases may wait for the next. */
   speak(raw: string) {
     if (!this.ready || !this.live) return;
     const s = this.settings;
-    const text = styleWord(raw, { caps: s.caps, longS: s.longS });
-    const index = this.liveCount++;
-    this.cursor = index;
+    this.heard.push(raw);
+    const { words, held } = compose(this.heard, wordingOf(s));
+    const ready = words.slice(0, words.length - held).map((w) => styleWord(w, { caps: s.caps, longS: s.longS }));
+    this.heard = this.heard.slice(this.heard.length - held);
+    if (!ready.length) return;
     if (s.mode === "word") {
+      // a held short word goes on stage with the word after it, as one
+      const index = this.liveCount;
+      this.liveCount += ready.length;
+      this.cursor = index + ready.length - 1;
       this.current?.beginExit(this.exitOptions(), this.env());
-      this.current = this.spawnWord(text, this.enterOptions());
+      this.current = this.spawnWord(ready.join(" "), this.enterOptions());
     } else {
-      this.writeLive(index, text);
+      ready.forEach((w, i) => {
+        const index = this.liveCount++;
+        this.cursor = index;
+        this.writeLive(index, w, this.glue(w, ready[i + 1]));
+      });
     }
     this.emit();
+  }
+
+  /** The word a short word must stay with on its row, if any. */
+  private glue(word: string, next: string | undefined) {
+    const s = this.settings;
+    return s.holdShortWords && next !== undefined && isShort(word, s.shortWordMax) ? next : undefined;
   }
 
   /**
@@ -310,7 +351,14 @@ export class Stage {
   transcribe(rawWords: string[]) {
     if (!this.ready || !this.live) return;
     const s = this.settings;
-    const words = rawWords.map((w) => styleWord(w, { caps: s.caps, longS: s.longS }));
+    // a finished segment's held words lead the next one; the last words may wait for more
+    const input = [...this.carry, ...rawWords];
+    const composed = compose(input, wordingOf(s));
+    this.lastInput = input;
+    this.lastHeld = composed.held;
+    const words = composed.words
+      .slice(0, composed.words.length - composed.held)
+      .map((w) => styleWord(w, { caps: s.caps, longS: s.longS }));
     const seg = this.segment;
     let keep = 0;
     while (keep < seg.length && keep < words.length && seg[keep].text === words[keep]) keep++;
@@ -324,7 +372,7 @@ export class Stage {
 
     for (let i = keep; i < words.length; i++) {
       const index = this.liveCount++;
-      seg.push(this.writeLive(index, words[i]));
+      seg.push(this.writeLive(index, words[i], this.glue(words[i], words[i + 1])));
     }
     this.cursor = this.liveCount - 1;
     this.emit();
@@ -333,6 +381,10 @@ export class Stage {
   /** Live transcript: the segment is final; the next one starts on a new line. */
   endSegment() {
     this.segment = [];
+    // words still held (a short word, an unfinished phrase) wait for the next segment
+    this.carry = this.lastHeld ? this.lastInput.slice(this.lastInput.length - this.lastHeld) : [];
+    this.lastInput = [];
+    this.lastHeld = 0;
     this.pause();
   }
 
@@ -375,15 +427,33 @@ export class Stage {
       this.emit();
       return;
     }
-    if (this.settings.mode === "word") {
+    const s = this.settings;
+    const tokens = this.parsed.tokens;
+    const token = tokens[this.cursor];
+    const holds = s.mode === "word" || s.mode === "paragraph";
+    // a short word waits for the next press, and then goes on with that word
+    if (holds && s.holdShortWords && this.cursor < total - 1 && isShort(token.text, s.shortWordMax)) {
+      if (this.pending === null) this.pending = this.cursor;
+      this.emit();
+      return;
+    }
+    const first = holds && this.pending !== null ? this.pending : this.cursor;
+    this.pending = null;
+    if (s.mode === "word") {
       this.current?.beginExit(this.exitOptions(), this.env());
-      this.current = this.spawnWord(this.parsed.tokens[this.cursor].text, this.enterOptions());
-    } else if (this.settings.mode === "paragraph") {
-      const token = this.parsed.tokens[this.cursor];
-      const before = this.parsed.tokens[this.cursor - 1];
-      if (before && before.stanza !== token.stanza && this.settings.stanzaBreaks) this.closeParagraph();
+      const text = tokens.slice(first, this.cursor + 1).map((t) => t.text).join(" ");
+      this.current = this.spawnWord(text, this.enterOptions());
+    } else if (s.mode === "paragraph") {
+      // breaks are decided against the word they go with: a held word ending a
+      // line or stanza moves on to the next row or paragraph with it
+      const before = tokens[first - 1];
+      if (before && before.stanza !== token.stanza && s.stanzaBreaks) this.closeParagraph();
       else if (before && before.line !== token.line) this.newRow();
-      this.segment.push(this.writeLive(this.cursor, token.text));
+      for (let i = first; i <= this.cursor; i++) {
+        const w = this.writeLive(i, tokens[i].text, i < this.cursor ? tokens[i + 1].text : undefined);
+        if (i < this.cursor) w.glued = true;
+        this.segment.push(w);
+      }
     } else {
       const p = this.tokenPage[this.cursor];
       let delay = 0;
@@ -406,16 +476,38 @@ export class Stage {
     const target = this.cursor - 1;
     const quick: EnterOptions = { effect: "fade", duration: 0.45, stagger: 0 };
 
+    // still held back: just step back over it
+    if (this.pending !== null && this.cursor < total) {
+      this.cursor = target;
+      if (this.cursor < this.pending) this.pending = null;
+      this.emit();
+      return;
+    }
+
     if (this.settings.mode === "word") {
       this.current?.fadeTo(0, 0.3, true);
-      this.cursor = target;
-      this.current = target >= 0 ? this.spawnWord(this.parsed.tokens[target].text, quick) : null;
+      // back to the previous word as it was shown: with the short words held for it
+      const s = this.settings;
+      const tokens = this.parsed.tokens;
+      const short = (i: number) => s.holdShortWords && isShort(tokens[i].text, s.shortWordMax);
+      let end = Math.min(target, total - 1);
+      while (end >= 0 && short(end) && end < total - 1) end--;
+      let start = end;
+      while (start > 0 && short(start - 1)) start--;
+      this.cursor = end;
+      this.current = end >= 0 ? this.spawnWord(tokens.slice(start, end + 1).map((t) => t.text).join(" "), quick) : null;
     } else if (this.settings.mode === "paragraph") {
       // words of a paragraph that has already left can't be called back
       const w = this.segment.at(-1);
       if (this.cursor >= total || !w || w.frame !== this.liveFrame) return;
       this.segment.pop();
       this.unwrite(w, 0.3);
+      // the short words written with it go back to waiting
+      while (this.segment.at(-1)?.glued && this.segment.at(-1)!.frame === this.liveFrame) {
+        const g = this.segment.pop()!;
+        this.unwrite(g, 0.3);
+        this.pending = g.index;
+      }
       const back = this.segment.at(-1);
       this.lastLive = back && back.frame === this.liveFrame ? back.actor : null;
       if (this.lastLive) this.lastLive.level = 1;
@@ -679,14 +771,16 @@ export class Stage {
    * at the top; in paragraph mode the old paragraph leaves quickly and the
    * new one starts somewhere else.
    */
-  private writeLive(index: number, text: string): LiveWord {
+  private writeLive(index: number, text: string, keepWith?: string): LiveWord {
     const s = this.settings;
     let L = this.liveFrame;
     if (!L) L = this.liveFrame = this.newLiveFrame(0);
     const sp = measureText(" ", this.font, L.f) * 1.05;
     const tw = measureText(text, this.font, L.f);
+    // a short word wraps together with the word it's kept with
+    const reserve = keepWith ? sp + measureText(keepWith, this.font, L.f) : 0;
     let pen = { row: L.row, x: L.x };
-    if (L.x > 0 && L.x + sp + tw > L.maxW) {
+    if (L.x > 0 && L.x + sp + tw + reserve > L.maxW) {
       L.row++;
       L.x = 0;
     }
@@ -853,6 +947,11 @@ export class Stage {
     this.segment = [];
     this.paragraphBoxes = [];
     this.fadeAt.clear();
+    this.pending = null;
+    this.heard = [];
+    this.carry = [];
+    this.lastInput = [];
+    this.lastHeld = 0;
   }
 
   /** Re-flow the current page instantly after a resize. */
