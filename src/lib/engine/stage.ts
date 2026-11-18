@@ -132,6 +132,8 @@ function layoutKey(s: Settings) {
     s.spellingOn,
     JSON.stringify(s.lexicon),
     JSON.stringify(s.spelling),
+    s.cropTop,
+    s.cropBottom,
   ].join("|");
 }
 
@@ -603,11 +605,24 @@ export class Stage {
     return { effect: s.exit, duration, stagger: s.exitStagger, delay };
   }
 
+  /**
+   * The band words may be placed in, after cropping the top and bottom of the
+   * screen: its height and the y of its centre (y up, 0 = screen centre).
+   */
+  private band() {
+    const s = this.settings;
+    const H = this.height;
+    const top = MathUtils.clamp(s.cropTop ?? 0, 0, 0.45);
+    const bottom = MathUtils.clamp(s.cropBottom ?? 0, 0, 0.45);
+    return { h: H * (1 - top - bottom), cy: (H * (bottom - top)) / 2 };
+  }
+
   private spawnWord(text: string, enter: EnterOptions): WordActor {
     const s = this.settings;
     const w = this.width;
     const h = this.height;
-    let f = h * 0.13 * s.size;
+    const band = this.band();
+    let f = Math.min(h * 0.13 * s.size, band.h * 0.7);
     let width = measureText(text, this.font, f);
     const maxW = w * 0.86;
     if (width > maxW) {
@@ -617,7 +632,7 @@ export class Stage {
     const j = s.jitter;
     const room = Math.max(0, (w * 0.94 - width) / 2);
     const x = MathUtils.clamp(rand(-1, 1) * w * 0.16 * j, -room, room);
-    const y = rand(-1, 1) * h * 0.12 * j;
+    const y = band.cy + rand(-1, 1) * band.h * 0.12 * j;
     const z = rand(-1, 0.3) * 220 * j;
     const actor = this.makeActor(text, f, new Vector3(x - width / 2, y - f * 0.3, z), 1);
     actor.beginEnter(enter, this.env());
@@ -655,8 +670,9 @@ export class Stage {
     const lines = this.pages[p].map((li) => this.parsed.lines[li]);
     const tokens = this.parsed.tokens;
     const lh = 1.48;
+    const band = this.band();
     const maxW = w * 0.86;
-    const maxH = h * 0.8;
+    const maxH = band.h * 0.8;
     const f0 = h * (s.mode === "line" ? 0.085 : 0.06) * s.size;
 
     const widthAt = (ti: number, f: number) => measureText(tokens[ti].text, this.font, f);
@@ -699,7 +715,7 @@ export class Stage {
     const sp = spaceAt(f);
     const rowWidths = rows.map((r) => r.ids.reduce((acc, ti) => acc + widthAt(ti, f), 0) + sp * (r.ids.length - 1) + r.indent);
     const blockW = Math.max(...rowWidths);
-    const top = (rows.length * lh * f) / 2 + h * 0.015;
+    const top = band.cy + (rows.length * lh * f) / 2 + band.h * 0.015;
     this.slots.clear();
     rows.forEach((r, i) => {
       const centerY = top - (i + 0.5) * lh * f;
@@ -829,7 +845,8 @@ export class Stage {
     const rows = s.mode === "line" ? s.linesAtOnce : s.mode === "page" ? s.maxPageLines : 2;
     const lineHeight = 1.48;
     const f0 = h * (s.mode === "page" ? 0.06 : 0.085) * s.size;
-    const f = Math.max(Math.min(f0, (h * 0.8) / (rows * lineHeight)), h * 0.022);
+    const band = this.band();
+    const f = Math.max(Math.min(f0, (band.h * 0.8) / (rows * lineHeight)), h * 0.022);
     const maxW = this.width * 0.86;
     return {
       f,
@@ -837,7 +854,7 @@ export class Stage {
       lineHeight,
       maxW,
       left: -maxW / 2,
-      top: (rows * lineHeight * f) / 2 + h * 0.015,
+      top: band.cy + (rows * lineHeight * f) / 2 + band.h * 0.015,
       row: 0,
       x: 0,
       count: 0,
@@ -852,21 +869,24 @@ export class Stage {
     const H = this.height;
     const rows = s.paragraphLines;
     const lineHeight = 1.48;
+    // paragraphs are placed inside the text band; font size still follows the screen
+    const band = this.band();
+    const BH = band.h;
     const mx = W * 0.05;
-    const my = H * 0.07;
-    const gap = Math.min(W, H) * 0.04;
+    const my = BH * 0.07;
+    const gap = Math.min(W, BH) * 0.04;
     const w = Math.min(W * s.paragraphWidth, W - 2 * mx);
     let f = Math.max(H * 0.05 * s.size, H * 0.022);
-    f = Math.min(f, (H - 2 * my) / (rows * lineHeight));
+    f = Math.min(f, (BH - 2 * my) / (rows * lineHeight));
     // two paragraphs must always fit side by side or one above the other, so the
     // new one never lands on the old: if they're too wide for that, set them smaller
-    if (w > (W - 2 * mx - gap) / 2) f = Math.min(f, (H - 2 * my - gap) / 2 / (rows * lineHeight));
+    if (w > (W - 2 * mx - gap) / 2) f = Math.min(f, (BH - 2 * my - gap) / 2 / (rows * lineHeight));
     const h = rows * lineHeight * f;
 
     const xMin = -W / 2 + mx;
     const xMax = Math.max(xMin, W / 2 - mx - w);
-    const yMax = H / 2 - my;
-    const yMin = Math.min(yMax, -H / 2 + my + h);
+    const yMax = band.cy + BH / 2 - my;
+    const yMin = Math.min(yMax, band.cy - BH / 2 + my + h);
     // above all stay clear of the paragraph that is leaving; the one before it only if there's room.
     // When paragraphs are too big to avoid it, the least overlap puts the new one at the far side.
     const boxes = this.paragraphBoxes;

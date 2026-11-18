@@ -387,6 +387,11 @@ export default function Setup({ text, onText, settings, onSettings, onPlay }: Pr
                 )}
               </Group>
 
+              <Group title="Text area">
+                <Slider label="Keep top free" value={s.cropTop} min={0} max={0.45} step={0.01} onChange={(v) => set("cropTop", v)} format={(v) => (v === 0 ? "none" : pct(v))} />
+                <Slider label="Keep bottom free" value={s.cropBottom} min={0} max={0.45} step={0.01} onChange={(v) => set("cropBottom", v)} format={(v) => (v === 0 ? "none" : pct(v))} />
+              </Group>
+
               </>
             )}
             {tab === "type" && (

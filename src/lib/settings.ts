@@ -29,6 +29,10 @@ export interface Settings {
   jitter: number; // 0..1 word mode position wander
   autoExit: number; // seconds, 0 = never (word mode)
 
+  // Text area: the band of the screen words are placed in; outside it is background
+  cropTop: number; // 0..0.45 of the screen height kept free of text at the top
+  cropBottom: number; // 0..0.45 of the screen height kept free of text at the bottom
+
   // Typeface
   font: FontId;
   italic: boolean;
@@ -94,6 +98,9 @@ export const DEFAULT_SETTINGS: Settings = {
   align: "center",
   jitter: 0.35,
   autoExit: 0,
+
+  cropTop: 0.25,
+  cropBottom: 0.25,
 
   font: "fell-english",
   italic: false,
