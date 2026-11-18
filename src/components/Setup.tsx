@@ -676,7 +676,7 @@ function Wording({ settings: s, set }: { settings: Settings; set: Set }) {
           />
         )}
         <p className="note">
-          A short word (<em>a, v, se, ale, no</em>…) never stands alone at the end of a line or a paragraph: it waits for the
+          A short word (<em>a, v, se, no</em>…) never stands alone at the end of a line or a paragraph: it waits for the
           next word and appears with it, on the new row or in the new paragraph if that word starts one. In Word mode the
           two appear together. In Line and Page modes with a script the page is laid out in advance, so this doesn&apos;t apply.
         </p>

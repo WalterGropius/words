@@ -140,7 +140,7 @@ const wordingOf = (s: Settings): WordingOptions => ({
   spelling: s.spelling ?? [],
   spellingOn: !!s.spellingOn,
   holdShort: !!s.holdShortWords,
-  shortMax: s.shortWordMax ?? 3,
+  shortMax: s.shortWordMax ?? 2,
 });
 
 const rand = (a: number, b: number) => a + Math.random() * (b - a);

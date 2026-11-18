@@ -118,7 +118,7 @@ export const DEFAULT_SETTINGS: Settings = {
   turbulence: 0.45,
 
   holdShortWords: true,
-  shortWordMax: 3,
+  shortWordMax: 2,
   lexicon: ["být, či nebýt"],
   spellingOn: false,
   spelling: [],
